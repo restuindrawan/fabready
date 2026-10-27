@@ -1,0 +1,14 @@
+{
+  "profile": "jlcpcb",
+  "fab": {
+    "min_track": 0.15
+  },
+  "power": {
+    "rails": { "VCC": 3.3 },
+    "current_ma": { "+3V3": 50 }
+  },
+  "ignore": [
+    "board.no-mounting-holes",
+    "fab.copper-near-edge:J1"
+  ]
+}

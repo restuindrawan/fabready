@@ -1,0 +1,20 @@
+[package]
+name = "pcbcheck-core"
+description = "KiCad PCB checks, renderer and report model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = ["png", "mcp"]
+png = ["dep:resvg"]
+mcp = ["png", "dep:base64"]
+
+[dependencies]
+anyhow.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+resvg = { version = "0.45", optional = true }
+base64 = { version = "0.22", optional = true }

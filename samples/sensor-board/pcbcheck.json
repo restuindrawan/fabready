@@ -1,0 +1,10 @@
+{
+  "power": {
+    "current_ma": {
+      "+3V3": 30
+    }
+  },
+  "ignore": [
+    "conn.*"
+  ]
+}

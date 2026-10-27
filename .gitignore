@@ -1,0 +1,7 @@
+/target
+node_modules/
+pcbcheck-out/
+__pycache__/
+app/src-tauri/gen/
+THIRD_PARTY_LICENSES.html
+.DS_Store

@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/pcbcheck-core", "crates/pcbcheck-cli", "app/src-tauri"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+authors = ["Restu Indrawan"]
+
+[workspace.dependencies]
+pcbcheck-core = { path = "crates/pcbcheck-core" }
+anyhow = "1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+strip = true

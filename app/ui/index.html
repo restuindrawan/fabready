@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>pcbcheck</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app" id="app" data-sidebar="open" data-inspector="open" data-state="empty">
+    <!-- Sidebar: recent projects -->
+    <aside class="sidebar" aria-label="Projects">
+      <div class="sb-top" data-tauri-drag-region>
+        <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
+      </div>
+      <div class="sb-actions">
+        <button class="sb-new" id="open"><span class="ico" data-icon="folder"></span>Open project<kbd>⌘O</kbd></button>
+      </div>
+      <nav class="sb-scroll">
+        <div class="sb-label">Projects</div>
+        <ul class="sb-list" id="projects"></ul>
+      </nav>
+      <div class="sb-foot">
+        <button class="sb-row" id="agents"><span class="ico" data-icon="plug"></span>Connect agents</button>
+        <div class="sb-meta" id="agent-status" hidden></div>
+        <div class="sb-meta" id="kicad-status">KiCad DRC: checking…</div>
+      </div>
+    </aside>
+
+    <!-- Main: header + board -->
+    <section class="main">
+      <header class="mh" data-tauri-drag-region>
+        <button class="icon-btn" id="show-sidebar" title="Show sidebar (⌘B)" aria-label="Show sidebar"></button>
+        <div class="mh-title" data-tauri-drag-region>
+          <span class="mh-name" id="project-name">pcbcheck</span>
+          <span class="mh-path" id="project-path" data-tauri-drag-region></span>
+        </div>
+        <div class="mh-actions">
+          <label class="select" id="profile-field" hidden title="Fab capability profile">
+            <select id="profile" aria-label="Fab profile">
+              <option value="jlcpcb">JLCPCB</option>
+              <option value="safe">Safe (any fab)</option>
+            </select>
+          </label>
+          <button class="icon-btn" id="recheck" hidden title="Re-check (⌘R)" aria-label="Re-check"><span class="ico" data-icon="refresh"></span></button>
+          <button class="icon-btn" id="export" hidden title="Export report, viewer and images to pcbcheck-out/" aria-label="Export report"><span class="ico" data-icon="download"></span></button>
+          <button class="icon-btn" id="toggle-inspector" hidden title="Toggle inspector (⌘I)" aria-label="Toggle inspector"></button>
+        </div>
+      </header>
+      <div class="preview-bar" id="preview-bar" hidden role="region" aria-label="Fix preview">
+        <span class="pv-tag"><span class="ico" data-icon="wrench"></span>Preview</span>
+        <span class="pv-title" id="pv-title"></span>
+        <span class="pv-delta" id="pv-delta"></span>
+        <span class="spacer"></span>
+        <button class="btn" id="pv-cancel">Cancel</button>
+        <button class="btn primary" id="pv-apply">Apply</button>
+      </div>
+      <div class="stage">
+        <div class="canvas" id="canvas" hidden></div>
+        <div class="welcome" id="welcome">
+          <div class="welcome-card" id="drop">
+            <div class="welcome-mark" aria-hidden="true"></div>
+            <h1>Check a PCB before you order it</h1>
+            <p>Open a KiCad project folder or drop it here. pcbcheck checks routing, fab limits and the board outline,
+              plus extra checks for keyboards, then re-checks every time you save in KiCad.</p>
+            <button class="btn primary" id="open-empty">Open project…</button>
+          </div>
+        </div>
+        <div class="toast" id="toast" role="status" hidden></div>
+      </div>
+    </section>
+
+    <div class="resizer" id="resizer" role="separator" aria-orientation="vertical" aria-label="Resize inspector" tabindex="0"></div>
+
+    <!-- Inspector -->
+    <aside class="inspector" aria-label="Inspector">
+      <div class="ins-head" data-tauri-drag-region>
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="findings" aria-selected="true">Findings</button>
+          <button role="tab" data-tab="parts" aria-selected="false">Parts</button>
+          <button role="tab" data-tab="board" aria-selected="false">Board</button>
+        </div>
+      </div>
+      <div class="filters" id="filters" role="group" aria-label="Filter findings"></div>
+      <div class="ins-body pcbv-ui" id="ins-body"></div>
+    </aside>
+  </div>
+
+  <dialog id="agents-dialog">
+    <h2>Connect AI agents</h2>
+    <p>This app is also an MCP server. Connected agents can check the board, see it, apply pcbcheck's automatic
+      fixes (<code>list_fixes</code>, <code>apply_fix</code>) and fix the rest by editing your KiCad files, while the app
+      re-checks after every save. Each finding's <b>Ask agent</b> button copies a ready-made prompt.</p>
+    <h3>Claude Code</h3>
+    <pre id="mcp-claude"></pre>
+    <h3>Claude Desktop, Cursor, and Other MCP Clients</h3>
+    <pre id="mcp-json"></pre>
+    <div class="actions">
+      <button class="btn" id="copy-claude">Copy command</button>
+      <button class="btn" id="copy-json">Copy JSON</button>
+      <button class="btn primary" id="close-agents">Done</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
