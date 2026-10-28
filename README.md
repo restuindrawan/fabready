@@ -31,7 +31,9 @@ cd app && npm install
 npx tauri build --bundles app      # fabready.app in target/release/bundle/macos/
 ```
 
-Open a KiCad project folder, or drop it on the window. The app re-checks every time you save in KiCad.
+Open a KiCad project folder, or drop it on the window. The app re-checks every time you save in KiCad. You
+can view the board layer by layer, edit it Figma-style (move footprints, route tracks, place vias, measure,
+undo), and chat with Claude Code, Codex or OpenCode about the board you have open.
 
 **Command line:**
 
@@ -40,7 +42,8 @@ cargo install --path crates/fabready-cli
 fabready check path/to/project
 ```
 
-**AI agents:** add fabready as an MCP server so your agent can check the board and apply fixes:
+**AI agents in their own terminal or editor:** add fabready as an MCP server so your agent can check the
+board and apply fixes:
 
 ```bash
 claude mcp add fabready -- fabready mcp
@@ -51,19 +54,22 @@ Each board's settings (fab profile, limit overrides, power rails, waived finding
 
 ## Docs
 
-- [Desktop app](docs/app.md): layout, fixing problems, waiving findings, shortcuts
+- [Desktop app](docs/app.md): layout, layers, editing tools, fixing problems, agent chat, waiving findings, shortcuts
 - [Command line and MCP](docs/command-line.md): commands, output files, exit codes, agent setup
 - [Configuration](docs/configuration.md): every `fabready.json` setting
 - [Parts review](docs/parts.md): how components are rated
 - [Keyboard PCBs](docs/keyboards.md): the extra keyboard checks and firmware helpers
-- [AGENTS.md](AGENTS.md): for AI agents using fabready, and for contributors
+- [CONTRIBUTING.md](CONTRIBUTING.md): setting up, adding checks, fixes and parts, and sending changes
+- [AGENTS.md](AGENTS.md): for AI agents using fabready or working on its code
 
 ## Privacy
 
-fabready runs entirely on your machine and makes no network requests. It only writes:
+fabready runs entirely on your machine and makes no network requests itself. The app's Agent tab starts the
+coding agent you pick (Claude Code, Codex or OpenCode). That agent talks to its own AI provider, and on
+first use `npx` downloads its adapter from npm. Nothing is sent until you use the chat. fabready only writes:
 
 - `fabready-out/` next to your board: reports, images, and backups made before automatic fixes
-- your `.kicad_pcb`, only when you or your agent apply an automatic fix
+- your `.kicad_pcb`, only when you or your agent apply an automatic fix, or you edit the board in the app
 - `fabready.json` next to your board, only when you change settings or waive a finding in the app
 - `~/.fabready/agent.json`: the name of the last agent that connected over MCP, shown in the app
 

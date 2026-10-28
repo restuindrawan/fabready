@@ -1,5 +1,5 @@
 // fabready desktop shell, laid out like an agent app:
-// sidebar (projects) · board canvas · inspector (findings / parts / board / settings).
+// sidebar (projects) · board canvas with editing toolbar (editor.js) · inspector (agent chat / findings / parts / board / settings).
 // The canvas and inspector content come from the shared PcbViewer (crates/fabready-core/assets).
 (async function () {
   "use strict";
@@ -29,6 +29,27 @@
     inspector: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M10 3v10"/>',
     x: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
     wrench: '<path d="M10.2 2.6a3.2 3.2 0 0 0-3.9 4.2L2.6 10.5a1.3 1.3 0 0 0 1.9 1.9l3.7-3.7a3.2 3.2 0 0 0 4.2-3.9l-2 2-1.9-.4-.4-1.9z"/>',
+    send: '<path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/>',
+    stop: '<rect x="4.5" y="4.5" width="7" height="7" rx="1.2" fill="currentColor" stroke="none"/>',
+    compose: '<path d="M8.5 2.5H4A1.5 1.5 0 0 0 2.5 4v8A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V7.5"/><path d="M12.2 1.8a1.1 1.1 0 0 1 1.6 1.6L8.5 8.7 6.5 9.5l.8-2z"/>',
+    check: '<path d="M3.5 8.5 6.5 11.5 12.5 4.5"/>',
+    eye: '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>',
+    pencil: '<path d="M11 2.5a1.4 1.4 0 0 1 2 2L5.5 12 2.5 13l1-3z"/>',
+    search: '<circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/>',
+    terminal: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 6.5 7 8.5 5 10.5M8.5 10.5H11"/>',
+    globe: '<circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c1.6 1.6 2.3 3.5 2.3 5.5S9.6 11.9 8 13.5C6.4 11.9 5.7 10 5.7 8S6.4 4.1 8 2.5z"/>',
+    dots: '<circle cx="4" cy="8" r=".8"/><circle cx="8" cy="8" r=".8"/><circle cx="12" cy="8" r=".8"/>',
+    tool: '<path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7"/>',
+    pointer: '<path d="M4 2.5 12 8.2 8.2 9 10.3 13.2 8.8 13.9 6.7 9.7 4 12.3z"/>',
+    hand: '<path d="M5.5 8.5V4a1 1 0 0 1 2 0v3.5M7.5 7V3a1 1 0 0 1 2 0v4M9.5 7V3.8a1 1 0 0 1 2 0V9a4.5 4.5 0 0 1-4.5 4.5h-.4a4 4 0 0 1-3.2-1.6L2.3 10.4a1 1 0 0 1 1.5-1.3L5.5 10.5"/>',
+    route: '<circle cx="3.5" cy="12.5" r="1.5"/><circle cx="12.5" cy="3.5" r="1.5"/><path d="M5 12.5h3l4.5-4.5V5"/>',
+    via: '<circle cx="8" cy="8" r="5"/><circle cx="8" cy="8" r="2"/>',
+    ruler: '<path d="M2.5 10.5 10.5 2.5l3 3-8 8z"/><path d="M5 8l1.3 1.3M7 6l1.3 1.3M9 4l1.3 1.3"/>',
+    undo: '<path d="M5.5 4 2.5 7l3 3"/><path d="M2.5 7h7a4 4 0 0 1 0 8H8"/>',
+    redo: '<path d="M10.5 4l3 3-3 3"/><path d="M13.5 7h-7a4 4 0 0 0 0 8H8"/>',
+    minus: '<path d="M3.5 8h9"/>',
+    plus: '<path d="M3.5 8h9M8 3.5v9"/>',
+    layers: '<path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.2 8 11.2 14 8.2M2 10.9 8 13.9 14 10.9"/>',
   };
   const icon = (name) =>
     `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
@@ -36,17 +57,19 @@
   $("toggle-sidebar").innerHTML = icon("sidebar");
   $("show-sidebar").innerHTML = icon("sidebar");
   $("toggle-inspector").innerHTML = icon("inspector");
+  $("cmp-new").innerHTML = icon("compose");
 
   // ------------------------------------------------------------ state
   const store = {
     get: (k, d) => { try { return JSON.parse(localStorage.getItem("fabready." + k)) ?? d; } catch { return d; } },
     set: (k, v) => localStorage.setItem("fabready." + k, JSON.stringify(v)),
   };
+  const TABS = ["agent", "findings", "parts", "board", "settings"];
   const state = {
     path: null,
     payload: null, // latest {report, svg} for the open project
     projects: store.get("projects", []),
-    tab: ["findings", "parts", "board", "settings"].includes(store.get("tab", "findings")) ? store.get("tab", "findings") : "findings",
+    tab: TABS.includes(store.get("tab", "agent")) ? store.get("tab", "agent") : "agent",
     activePart: null,
     filter: "all",
     active: null, // selected finding index
@@ -55,12 +78,75 @@
     exe: null, // this app's binary (for MCP setup text)
     cfg: null, // project settings (fabready.json) for the Settings tab, see loadConfig
     watching: false, // the file watcher re-checks after each save
+    edits: {}, // project path -> manual edits applied this session (for the agent)
   };
   app.dataset.sidebar = store.get("sidebar", "open");
   app.dataset.inspector = store.get("inspector", "open");
   app.style.setProperty("--ins-open-w", store.get("insWidth", 360) + "px");
 
-  const canvas = V.createCanvas($("canvas"), { onSelect: (i) => select(i, false) });
+  // The editor (toolbar, selection, tools) is created just below; the canvas calls into it once a board is shown.
+  let editor = null;
+  const canvas = V.createCanvas($("canvas"), {
+    figmaNav: true,
+    onSelect: (i) => select(i, false),
+    onPick: (item, why, e, gone) => editor.pick(item, why, e, gone),
+    onMarquee: (box, e) => editor.marquee(box, e),
+    canDrag: (item) => editor.canDrag(item),
+    onDragStart: (item, pt, e) => editor.onDragStart(item, pt, e),
+    onDragMove: (dx, dy, e) => editor.onDragMove(dx, dy, e),
+    onDragEnd: (dx, dy, e) => editor.onDragEnd(dx, dy, e),
+    onTool: (type, pt, e) => editor.onTool(type, pt, e),
+    onViewport: () => editor && editor.viewport(),
+    onView: () => { if (chat) chat.refresh(); if (editor) editor.viewChanged(); },
+  });
+
+  // Footprint references on the board, to turn them into links in agent replies.
+  let refsCache = { report: null, set: new Set() };
+  function boardRefs() {
+    const r = state.payload && state.payload.report;
+    if (r !== refsCache.report) {
+      refsCache = { report: r, set: new Set(r ? [...(r.parts || []).flatMap((p) => p.refs), ...r.findings.flatMap((f) => f.refs || [])] : []) };
+    }
+    return refsCache.set;
+  }
+
+  /** Select finding `i` on the board without leaving the current tab (the agent pointing at something). */
+  function point(i, refs) {
+    const f = state.payload && state.payload.report.findings[i];
+    if (!f || state.preview) return;
+    state.active = i;
+    canvas.focus(i, [...new Set([...(f.refs || []), ...(refs || [])])], true);
+    if (app.dataset.inspector === "closed") setPanel("inspector", "open");
+    if (state.tab !== "agent") renderInspector();
+    chat.refresh();
+  }
+
+  const chat = window.FabreadyChat({
+    invoke, listen, esc, icon, store, toast, copyText, promptFor, point,
+    state: () => state,
+    refs: boardRefs,
+    finding: (i) => state.payload && state.payload.report.findings[i],
+    focusRefs: (refs) => canvas.focusRefs(refs),
+    startPreview: (ids) => startPreview(ids, true),
+    openMcp: () => $("agents").click(),
+    view: () => canvas.view(),
+    showLayers: (names) => canvas.showLayers(names),
+    setSide: (side) => canvas.setSide(side),
+    selection: () => editor.selection(),
+    edits: () => state.edits[state.path] || [],
+  });
+
+  editor = window.FabreadyEditor({
+    invoke, esc, icon, store, canvas,
+    path: () => state.path,
+    revision: () => state.payload && state.payload.token,
+    previewing: () => !!state.preview,
+    changed: () => chat.refresh(),
+    recheck: () => check(),
+    recordEdits: (path, done) => recordEdits(path, done),
+    recordUndo: (path, verb, label) => chat.event(path, { agent: `The user ${verb.toLowerCase()} a change: ${label}.`, user: `${verb}: ${label}.` }),
+    ask: (infos) => { openChat(); chat.askItems(infos.map((i) => ({ info: i, text: editor.describe(i) }))); },
+  });
 
   // ------------------------------------------------------------ helpers
   function ago(t) {
@@ -122,14 +208,32 @@
     }
   }
 
+  function markTab(tab) {
+    document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+    // A narrow inspector scrolls the tab strip; keep the current tab in sight.
+    const sel = document.querySelector(`.tabs [data-tab="${tab}"]`);
+    if (sel) sel.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
   function renderInspector() {
     if (!state.payload) return;
     const body = $("ins-body");
+    const agent = state.tab === "agent" && !state.preview;
+    body.hidden = agent;
+    $("chat").hidden = !agent;
+    if (agent) {
+      markTab("agent");
+      $("filters").hidden = true;
+      if (body.dataset.view !== "agent") chat.show();
+      body.dataset.view = "agent";
+      chat.refresh();
+      return;
+    }
     const scroll = body.scrollTop;
     if (state.preview) {
       body.dataset.view = "preview";
       // Preview: what changes, then the findings as they'd be afterwards.
-      document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === "findings")));
+      markTab("findings");
       $("filters").hidden = true;
       const changes = state.preview.changes.map((c) => `<div class="chg"><div class="t">${esc(c.title)}</div><div class="d">${esc(c.detail)}</div></div>`).join("");
       body.innerHTML = `<div class="pcbv-group">Changes</div>${changes}<div class="pcbv-group">After the fix</div>` + V.findingsHtml(state.preview.report, "all", null);
@@ -137,7 +241,7 @@
     }
     const r = state.payload.report;
     const s = r.summary;
-    document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
+    markTab(state.tab);
     const filters = $("filters");
     filters.hidden = state.tab !== "findings" || !r.findings.length;
     if (state.tab === "settings") {
@@ -181,17 +285,23 @@
     const f = state.active != null ? payload.report.findings[state.active] : null;
     canvas.focus(state.active, f && f.refs, false);
     renderInspector();
+    // The file may have changed under the card (an agent, KiCad, or this app); show current values.
+    editor.refresh();
+    chat.refresh();
   }
 
   function select(i, zoom) {
     if (state.preview) return;
+    if (i != null && editor.hasSelection()) editor.clear();
     state.active = i;
     const f = i != null && state.payload ? state.payload.report.findings[i] : null;
     canvas.focus(i, f && f.refs, zoom);
-    if (i != null && state.tab !== "findings") state.tab = "findings";
+    // In the Agent tab a click on the board just changes what the agent is told you're looking at.
+    if (i != null && state.tab !== "findings" && state.tab !== "agent") state.tab = "findings";
     if (f && state.filter !== "all" && state.filter !== f.severity) state.filter = "all";
     if (i != null && app.dataset.inspector === "closed") setPanel("inspector", "open");
     renderInspector();
+    chat.refresh();
     const li = $("ins-body").querySelector(".fnd.active");
     if (li) li.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
@@ -224,11 +334,15 @@
   async function openProject(path) {
     if (!path) return;
     if (dirty()) toast(`Unsaved settings for ${basename(state.path)} were discarded.`);
+    state.preview = null;
+    $("preview-bar").hidden = true;
     state.path = path;
+    editor.projectChanged();
     state.active = null;
     state.cfg = null;
     state.watching = false;
     if (state.tab === "settings") loadConfig();
+    if (state.tab === "agent" && state.payload) chat.show();
     rememberProject(path, null);
     renderHeader();
     await check();
@@ -254,12 +368,16 @@
   // ------------------------------------------------------------ fixes
   const delta = (label, a, b) => (a === b ? "" : `${label} <b>${a}</b> → <b>${b}</b>`);
 
-  async function startPreview(ids) {
-    if (!state.path) return;
+  /** `quiet`: return the preview and throw on failure instead of showing a toast (agent's propose_fix). */
+  async function startPreview(ids, quiet) {
+    if (!state.path) return null;
+    if (quiet && state.preview) throw new Error("A fix preview is already open; the user has to apply or cancel it first.");
+    const path = state.path;
     busy(true);
     try {
-      const p = await invoke("preview_fixes", { path: state.path, fixes: ids });
-      state.preview = Object.assign({ ids }, p);
+      const p = await invoke("preview_fixes", { path, fixes: ids });
+      if (path !== state.path) return null;
+      state.preview = Object.assign({ ids, path }, p);
       state.active = null;
       const after = p.report.summary;
       $("pv-title").textContent = p.changes.length === 1 ? p.changes[0].title : `${p.changes.length} fixes`;
@@ -269,44 +387,71 @@
       canvas.focus(null);
       if (app.dataset.inspector === "closed") setPanel("inspector", "open");
       renderInspector();
+      editor.refresh();
+      chat.refresh();
       $("pv-apply").focus();
+      return state.preview;
     } catch (e) {
+      if (quiet) throw e;
       toast(String(e), "error");
+      return null;
     } finally {
       busy(false);
     }
   }
 
-  function endPreview() {
+  function endPreview(cancelled) {
+    if (cancelled === true && state.preview) {
+      chat.event(state.preview.path, { agent: "The user cancelled the fix preview you proposed.", user: "Cancelled the proposed fix." }, { proposalOnly: true });
+    }
     state.preview = null;
     $("preview-bar").hidden = true;
     if (state.payload) show(state.payload);
+    editor.refresh();
   }
 
   async function applyPreview() {
     const p = state.preview;
     if (!p) return;
+    const path = p.path;
+    const manual = p.ids.every(isEdit);
     try {
-      const done = await invoke("apply_fixes", { path: state.path, fixes: p.ids, token: p.token });
-      endPreview();
+      const done = await invoke("apply_fixes", { path, fixes: p.ids, token: p.token });
+      if (manual) recordEdits(path, done);
       const n = done.changes.length;
-      toast(`Applied ${n} fix${n === 1 ? "" : "es"} · errors ${done.before.error} → ${done.after.error}. If the board is open in KiCad, reload it (File → Revert).`,
-        null, { label: "Undo", run: () => undo(done.backup) });
+      editor.pushUndo(manual ? done.changes.map((c) => c.title).join(" · ") : `${n} automatic fix${n === 1 ? "" : "es"}`, done, path);
+      if (state.path !== path || state.preview !== p) return;
+      endPreview();
+      const what = manual ? `${done.changes.map((c) => c.title).join(" · ")} · errors ${done.before.error} → ${done.after.error}`
+        : `Applied ${n} fix${n === 1 ? "" : "es"} · errors ${done.before.error} → ${done.after.error}`;
+      if (!manual) {
+        chat.event(path, {
+          agent: `The user applied ${n} automatic fix${n === 1 ? "" : "es"} (${done.changes.map((c) => c.title).join("; ")}); errors ${done.before.error} → ${done.after.error}.`,
+          user: what + ".",
+        });
+      }
+      chat.settled(path);
+      toast(`${what}. If the board is open in KiCad, reload it (File → Revert).`,
+        null, { label: "Undo", run: () => editor.undo() });
       await check();
     } catch (e) {
-      toast(String(e), "error");
-      if (/changed since the preview/.test(String(e))) endPreview();
+      if (state.path === path && state.preview === p) toast(String(e), "error");
+      if (state.path === path && state.preview === p && /changed since the preview/.test(String(e))) endPreview();
     }
   }
 
-  async function undo(backup) {
-    try {
-      await invoke("restore_backup", { path: state.path, backup });
-      await check();
-      toast("Fix undone. If the board is open in KiCad, reload it (File → Revert).");
-    } catch (e) {
-      toast(String(e), "error");
-    }
+  // ------------------------------------------------------------ board editing (see editor.js)
+  const isEdit = (id) => /^(edit|delete|add):/.test(id);
+
+  /** Remember manual edits for the agent (app_state, and its next message). */
+  function recordEdits(path, done) {
+    const log = (state.edits[path] = state.edits[path] || []);
+    for (const c of done.changes) log.push({ title: c.title, detail: c.detail, at: new Date().toISOString(), backup: done.backup });
+    const list = done.changes.map((c) => `${c.title} (${c.detail})`).join("; ");
+    chat.event(path, {
+      agent: `The user edited the board by hand: ${list}. Errors ${done.before.error} → ${done.after.error}.`,
+      user: `Edited by hand: ${done.changes.map((c) => c.title).join(" · ")}.`,
+    });
   }
 
   // ------------------------------------------------------------ project settings (fabready.json)
@@ -485,6 +630,7 @@
     if (errors.length) return updateBar(errors[0]);
     try {
       await invoke("save_config", { path: c.path, config });
+      chat.event(c.path, { agent: "The user changed the project settings in fabready.json." });
       Object.assign(c, { saved: config, exists: true, error: null, draft: Object.assign(toForm(config), { newIgnore: c.draft.newIgnore }) });
       renderSettings();
       toast("Saved fabready.json. Re-checking the board.");
@@ -557,9 +703,11 @@
     if (!f) return;
     const pattern = f.refs && f.refs.length === 1 ? `${f.id}:${f.refs[0]}` : f.id;
     if (!(await updateConfig((c) => { if (!c.ignore.includes(pattern)) c.ignore.push(pattern); }))) return;
+    chat.event(state.path, { agent: `The user waived ${pattern} (${f.title}) in fabready.json.`, user: `Waived ${pattern}.` });
     state.active = null;
     canvas.focus(null);
     renderInspector();
+    chat.refresh();
     toast(`Waived ${pattern}. You can undo it later in Settings.`, null,
       { label: "Undo", run: () => updateConfig((c) => { c.ignore = c.ignore.filter((p) => p !== pattern); }) });
   }
@@ -616,12 +764,22 @@
     }
   }
 
-  async function askAgent(indices) {
+  /** "Ask agent": hand the findings to the chat in the Agent tab. (Copy as prompt there still serves outside agents.) */
+  function askAgent(indices) {
     if (!indices.length) return;
-    await copyText(promptFor(indices));
-    await refreshAgent();
-    const who = state.agent ? state.agent.client : "your agent";
-    toast(`Prompt copied. Paste it into ${who}; this app re-checks as the files change.`);
+    openChat();
+    chat.ask(indices);
+  }
+
+  function openChat() {
+    if (!state.payload) return;
+    if (app.dataset.inspector === "closed") setPanel("inspector", "open");
+    if (state.tab !== "agent") {
+      state.tab = "agent";
+      store.set("tab", state.tab);
+      renderInspector();
+    }
+    chat.focus();
   }
 
   // ------------------------------------------------------------ events
@@ -667,6 +825,7 @@
     store.set("tab", state.tab);
     if (state.tab === "settings" && state.path && !(state.cfg && state.cfg.path === state.path)) loadConfig();
     renderInspector();
+    if (state.tab === "agent") chat.focus();
   });
   $("filters").addEventListener("click", (e) => {
     const b = e.target.closest("[data-filter]");
@@ -721,7 +880,7 @@
       addWaiver();
     }
   });
-  $("pv-cancel").onclick = endPreview;
+  $("pv-cancel").onclick = () => endPreview(true);
   $("pv-apply").onclick = applyPreview;
 
   // Inspector resize
@@ -776,23 +935,31 @@
     const exe = await invoke("mcp_command");
     const json = JSON.stringify({ mcpServers: { fabready: { command: exe, args: ["mcp"] } } }, null, 2);
     const claude = `claude mcp add fabready -- "${exe}" mcp`;
+    const codex = `codex mcp add fabready -- "${exe}" mcp`;
     $("mcp-json").textContent = json;
     $("mcp-claude").textContent = claude;
+    $("mcp-codex").textContent = codex;
     $("copy-json").onclick = () => { copyText(json); toast("Copied MCP config"); };
     $("copy-claude").onclick = () => { copyText(claude); toast("Copied command"); };
+    $("copy-codex").onclick = () => { copyText(codex); toast("Copied command"); };
     $("agents-dialog").showModal();
   };
   $("close-agents").onclick = () => $("agents-dialog").close();
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && state.preview && !$("agents-dialog").open) {
-      endPreview();
+      endPreview(true);
+      return;
+    }
+    if (state.payload && !state.preview && !$("agents-dialog").open && editor.keydown(e)) {
+      e.preventDefault();
       return;
     }
     if (e.key === "Escape" && state.active != null && !$("agents-dialog").open) {
       state.active = null;
       canvas.focus(null);
       renderInspector();
+      chat.refresh();
       return;
     }
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -804,6 +971,7 @@
       0: () => canvas.fit(),
       s: () => state.tab === "settings" && dirty() && saveSettings(),
       enter: () => state.preview && applyPreview(),
+      l: openChat,
     };
     if (e.shiftKey && e.key.toLowerCase() === "f" && state.payload && state.payload.report.fixes.length && !state.preview) {
       e.preventDefault();

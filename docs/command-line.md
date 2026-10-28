@@ -76,6 +76,13 @@ Both `fabready mcp` and the desktop app's `fabready-app mcp` run an MCP server o
 | `undo_fix` | Restore a backup made by `apply_fix` |
 | `get_matrix` | Keyboard boards: the switch matrix and controller pins, for firmware work |
 
+When the desktop app starts the server for its own agent chat, it adds three tools that act in the app
+window: `app_state` (what the user has open and selected, the layers on screen, and edits they made by hand),
+`show_on_board` (select a finding, highlight parts, show only some layers, or view from the bottom) and
+`propose_fix` (open a fix preview for the user to apply). They talk to the window over a
+localhost socket with a per-launch token, set through `FABREADY_APP_ADDR`, `FABREADY_APP_TOKEN` and
+`FABREADY_APP_PROJECT`. Other MCP clients don't get them.
+
 ### Setup
 
 Claude Code:
@@ -84,6 +91,12 @@ Claude Code:
 claude mcp add fabready -- fabready mcp
 # or, using the desktop app:
 claude mcp add fabready -- /Applications/fabready.app/Contents/MacOS/fabready-app mcp
+```
+
+Codex:
+
+```bash
+codex mcp add fabready -- fabready mcp
 ```
 
 Claude Desktop, Cursor and other MCP clients:
@@ -96,5 +109,5 @@ Claude Desktop, Cursor and other MCP clients:
 }
 ```
 
-The app's **Connect agents** button shows both, filled in with the app's own path. How agents should use
+The app's **Connect agents** button shows these, filled in with the app's own path. How agents should use
 these tools is described in [AGENTS.md](../AGENTS.md).

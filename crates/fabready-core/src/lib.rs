@@ -5,6 +5,7 @@
 pub mod board;
 pub mod config;
 pub mod connectivity;
+pub mod edit;
 pub mod fab;
 pub mod findings;
 pub mod fixes;

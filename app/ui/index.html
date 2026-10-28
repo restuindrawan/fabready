@@ -57,6 +57,7 @@
       </div>
       <div class="stage">
         <div class="canvas" id="canvas" hidden></div>
+        <form class="props pcbv-ui" id="props" hidden aria-label="Selected item" autocomplete="off"></form>
         <div class="welcome" id="welcome">
           <div class="welcome-card" id="drop">
             <div class="welcome-mark" aria-hidden="true"></div>
@@ -76,7 +77,8 @@
     <aside class="inspector" aria-label="Inspector">
       <div class="ins-head" data-tauri-drag-region>
         <div class="tabs" role="tablist">
-          <button role="tab" data-tab="findings" aria-selected="true">Findings</button>
+          <button role="tab" data-tab="agent" aria-selected="true" title="Chat with your coding agent (⌘L)">Agent</button>
+          <button role="tab" data-tab="findings" aria-selected="false">Findings</button>
           <button role="tab" data-tab="parts" aria-selected="false">Parts</button>
           <button role="tab" data-tab="board" aria-selected="false">Board</button>
           <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
@@ -84,25 +86,46 @@
       </div>
       <div class="filters" id="filters" role="group" aria-label="Filter findings"></div>
       <div class="ins-body pcbv-ui" id="ins-body"></div>
+      <div class="chat pcbv-ui" id="chat" hidden>
+        <div class="chat-log" id="chat-log" role="log" aria-label="Conversation with the agent"></div>
+        <form class="composer" id="composer">
+          <div class="cmp-chips" id="cmp-chips" hidden></div>
+          <textarea id="cmp-text" rows="1" placeholder="Ask about this board…" aria-label="Message to the agent" spellcheck="true"></textarea>
+          <div class="cmp-row">
+            <div class="cmp-opts">
+              <label class="mini-select" title="Agent"><select id="cmp-agent" aria-label="Agent"></select></label>
+              <span class="cmp-config" id="cmp-config"></span>
+            </div>
+            <button type="button" class="icon-btn" id="cmp-new" title="New conversation" aria-label="New conversation"></button>
+            <button type="submit" class="cmp-send" id="cmp-send" aria-label="Send"></button>
+          </div>
+        </form>
+      </div>
     </aside>
   </div>
 
   <dialog id="agents-dialog">
     <h2>Connect AI agents</h2>
-    <p>This app is also an MCP server. Connected agents can check the board, see it, apply fabready's automatic
-      fixes (<code>list_fixes</code>, <code>apply_fix</code>) and fix the rest by editing your KiCad files, while the app
-      re-checks after every save. Each finding's <b>Ask agent</b> button copies a ready-made prompt.</p>
+    <p>The <b>Agent</b> tab chats with Claude Code, Codex or OpenCode right here. If you'd rather use your own
+      terminal or editor, this app is also an MCP server: connected agents can check the board, see it, apply
+      fabready's automatic fixes (<code>list_fixes</code>, <code>apply_fix</code>) and fix the rest by editing your
+      KiCad files, while the app re-checks after every save.</p>
     <h3>Claude Code</h3>
     <pre id="mcp-claude"></pre>
+    <h3>Codex</h3>
+    <pre id="mcp-codex"></pre>
     <h3>Claude Desktop, Cursor, and Other MCP Clients</h3>
     <pre id="mcp-json"></pre>
     <div class="actions">
-      <button class="btn" id="copy-claude">Copy command</button>
+      <button class="btn" id="copy-claude">Copy Claude command</button>
+      <button class="btn" id="copy-codex">Copy Codex command</button>
       <button class="btn" id="copy-json">Copy JSON</button>
       <button class="btn primary" id="close-agents">Done</button>
     </div>
   </dialog>
 
+  <script src="agent.js"></script>
+  <script src="editor.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -33,6 +33,10 @@ Exit codes: `0` pass/warn, `1` errors (or warnings with `--strict`), `2` could n
   never by changing fabready. The same file holds the fab profile, limit overrides and power rails
   (see `docs/configuration.md`). The desktop app may have it open in its Settings tab and re-reads it on save.
 - Connectivity and zone checks are approximations. When kicad-cli is installed, its DRC is authoritative.
+- Inside the desktop app's Agent tab you also get `app_state`, `show_on_board` and `propose_fix`. Each message
+  starts with a `<fabready_app>` block saying what the user has open and selected (a finding, or the tracks, vias
+  and footprints they selected), which layers are on screen, and edits they made by hand. Point at the findings, parts
+  and layers you discuss, and prefer `propose_fix` over `apply_fix` so the user reviews the change on the board.
 
 ## Developing
 
@@ -57,6 +61,16 @@ cd app && npx tauri build --bundles app    # build fabready.app (target/release/
 - Automatic fixes live in `crates/fabready-core/src/fixes.rs`: the check attaches `.fixable("<kind>:...")` to its
   finding, and `fixes::plan` turns that id into byte-range edits of the `.kicad_pcb` (S-expression nodes carry
   spans). Only add fixes that need no design judgement, and keep edits surgical so the rest of the file is untouched.
+- Manual edits from the app live in `crates/fabready-core/src/edit.rs` (`edit:<kind>:<id>:<prop>=<value>` incl. relative
+  `move=`/`rotate=`, `delete:<kind>:<id>`, `add:track:...`, `add:via:...`). `fixes::plan` hands them over, so they share
+  preview, backup and the stale-file guard; `fixes::swap` is undo/redo. Moves drag connected track ends along.
+  Item ids are uuids (or `#<n>` file order, see `board::item_id`); the renderer puts them on SVG elements as `data-item`.
+- The app's editor (`app/ui/editor.js`: toolbar, tools, multi-select, properties card, ⌘Z) drives the shared canvas
+  through hooks in `viewer.js` (`onTool`, `onMarquee`, `canDrag`/`onDrag*`, `snap`, `ghost`, `layer`). The standalone
+  viewer passes none of them and stays read-only.
+- The renderer draws every board layer as a `<g data-layer>` group (colour via `currentColor`, `display="none"` for layers
+  off by default); `render::layer_style` holds the defaults. The viewer's layers panel, bottom view and item picking work
+  off those attributes, so keep them when changing `render.rs`.
 - Component checks live in `crates/fabready-core/src/parts.rs`: `collect` (ratings + board stress) then `evaluate`
   (findings for under-rated parts, notes for over-spec). Common parts go in `LIBRARY` with typical datasheet values.
   fabready makes no network requests; don't add calls to unofficial or scraped endpoints (respect vendors' terms).
@@ -66,6 +80,12 @@ cd app && npx tauri build --bundles app    # build fabready.app (target/release/
   and served to the app through the `viewer_assets` command, so change it in one place only.
 - The app frontend (`app/ui/`) is plain HTML/CSS/JS with no build step. It uses `window.__TAURI__` (`withGlobalTauri`).
   Debug builds embed `app/ui`, so rebuild after editing it unless you're running `tauri dev`.
+- Agent chat: `app/src-tauri/src/agent.rs` is an [ACP](https://agentclientprotocol.com) client (one process per
+  agent, one session per project; `opencode acp`, or the official Claude Code and Codex adapters, through `npx`
+  when they aren't installed). Each session gets `<app> mcp` with `FABREADY_APP_*` set, which turns on the app tools
+  in `mcp.rs`; they reach the window through `bridge.rs` (localhost socket + token) and `app-request` events handled
+  in `app/ui/agent.js`. `FABREADY_TEST_PROMPT=1 cargo test -p fabready-app` also sends a real prompt through
+  OpenCode when it's installed.
 - Project settings: `config::Config` is the `fabready.json` schema. `Config::validate` runs on load and save, and
   `Config::save` keeps unknown keys. The app's Settings tab (`load_config` / `save_config` commands) and Waive
   button write through it; the app passes no profile override, so the file is the single source of truth.
