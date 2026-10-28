@@ -4,6 +4,11 @@ Pre-order checks for KiCad PCBs. fabready finds the mistakes that would cost you
 place it. It runs as a desktop app, a command-line tool and an MCP server for AI agents, all built on one
 Rust engine.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/app-dark.png">
+  <img alt="The fabready desktop app showing a keyboard PCB with numbered problem markers on the board and a list of findings beside it" src="docs/images/app-light.png">
+</picture>
+
 ## What it checks
 
 - **Routing:** unrouted nets and footprints with no connections

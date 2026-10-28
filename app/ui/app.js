@@ -111,7 +111,8 @@
   // ------------------------------------------------------------ header + inspector
   function renderHeader() {
     $("project-name").textContent = state.path ? basename(state.path) : "fabready";
-    $("project-path").textContent = state.path || "";
+    // Left-to-right marks keep the slashes in place inside the right-to-left (truncate-from-the-left) label.
+    $("project-path").textContent = state.path ? `\u200E${state.path}\u200E` : "";
     document.title = state.path ? `${basename(state.path)} — fabready` : "fabready";
     const r = state.payload && state.payload.report;
     if (r) {
