@@ -334,10 +334,37 @@ fn plan_all(path: &Path, opts: &Options, ids: &[String]) -> Result<Planned> {
     }
     let (_, _, rules) = report::settings(&pcb, opts)?;
     let root = sexpr::parse(&original)?;
-    let plans = ids.iter().map(|id| plan(&original, &root, &current.board, &rules, id)).collect::<Result<Vec<_>>>()?;
-    let edits: Vec<Edit> = plans.iter().flat_map(|p| p.edits.iter().cloned()).collect();
+    let mut plans = ids.iter().map(|id| plan(&original, &root, &current.board, &rules, id)).collect::<Result<Vec<_>>>()?;
+    let invalidates_zones = ids.iter().any(|id| {
+        let parts: Vec<&str> = id.splitn(4, ':').collect();
+        if matches!(parts.first(), Some(&"widen-track" | &"resize-via" | &"antenna-keepout"))
+            || parts.first() == Some(&"add")
+            || (parts.first() == Some(&"delete") && matches!(parts.get(1), Some(&"track" | &"via")))
+        {
+            return true;
+        }
+        let property = parts.get(3).and_then(|v| v.split_once('=')).map(|(key, _)| key);
+        matches!(
+            (parts.first().copied(), parts.get(1).copied(), property),
+            (Some("edit"), Some("fp"), Some("move" | "rotate" | "at"))
+                | (Some("edit"), Some("via"), Some("move" | "at" | "size" | "drill"))
+                | (Some("edit"), Some("track"), Some("width" | "layer"))
+        )
+    });
+    let mut extra_edits = Vec::new();
+    if invalidates_zones {
+        for zone in root.children("zone") {
+            extra_edits.extend(zone.children("filled_polygon").map(|fill| crate::edit::delete_node(&original, fill)));
+        }
+        for plan in &mut plans {
+            plan.change.detail.push_str(" Refill all copper zones (B) and run KiCad DRC before fabrication.");
+        }
+    }
+    let mut edits: Vec<Edit> = plans.iter().flat_map(|p| p.edits.iter().cloned()).collect();
+    edits.extend(extra_edits);
     let new_text = apply_edits(&original, &edits)?;
-    sexpr::parse(&new_text).context("fix produced an unreadable board (nothing was written)")?;
+    let updated = sexpr::parse(&new_text).context("fix produced an unreadable board (nothing was written)")?;
+    crate::edit::validate_batch(&updated, &ids)?;
     Ok(Planned { pcb, sch, before: current.report.summary.clone(), original, new_text, plans })
 }
 

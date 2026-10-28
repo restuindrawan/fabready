@@ -60,8 +60,8 @@ changed and the error count afterwards, and the board re-checks.
 | Via | I | Click to place a via. It joins the net of the pad or track it lands on. The toolbar sets its diameter and drill. |
 | Measure | M | Click two points. Snaps to pads, vias and track ends, and shows the distance and Δx/Δy. |
 
-Moves snap to a 0.1 mm grid. Hold ⇧ to keep a drag to one axis, or ⌥ to turn snapping off. Tracks that end
-on a moved pad or via stretch to follow, like KiCad's Drag. With items selected:
+Moves snap to a 0.1 mm grid. Hold ⇧ to keep a drag to one axis, or ⌥ to turn snapping off. Track ends
+connected to moved pads or vias follow; moves that cannot safely preserve a connection are refused. With items selected:
 
 - Arrow keys nudge them 0.1 mm (⇧: 1 mm).
 - R rotates footprints 90° (⇧R the other way).
@@ -82,9 +82,10 @@ With several items selected, the card offers Rotate, Delete and Ask agent for al
 changed elsewhere since (in KiCad or by an agent), so it never throws that work away.
 
 These are quick touch-ups, not a replacement for KiCad. A stretched track can end up running across other pads;
-the re-check flags anything that breaks. A track moved to another layer needs vias. A renamed reference or
-value goes back to the schematic's on the next Update PCB from Schematic unless you change it there too. If the
-board is open in KiCad, reload it (File → Revert) after editing here.
+the re-check flags anything that breaks. Geometry edits clear saved copper-zone fills; refill zones in KiCad (B)
+and run KiCad DRC before fabrication. A track moved to another layer needs vias. A renamed reference or value
+goes back to the schematic's on the next Update PCB from Schematic unless you change it there too. If the board
+is open in KiCad, reload it (File → Revert) after editing here.
 
 ## Fixing problems
 

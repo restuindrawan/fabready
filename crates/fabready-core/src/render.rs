@@ -193,7 +193,8 @@ pub fn svg(board: &Board, findings: &[Finding]) -> String {
         let side = if layer == "F.Cu" { "f" } else { "b" };
         let _ = writeln!(
             o,
-            r#"<g id="{id}" class="L{}" data-layer="{}" data-label="{}" color="{col}"{}>"#,
+            r#"<g id="{}" class="L{}" data-layer="{}" data-label="{}" color="{col}"{}>"#,
+            esc(&id),
             if copper { " copper" } else { "" },
             esc(layer),
             esc(&label),
@@ -204,22 +205,24 @@ pub fn svg(board: &Board, findings: &[Finding]) -> String {
                 if z.keepout {
                     let _ = writeln!(
                         o,
-                        r##"<polygon class="zone keepout" points="{}" fill="none" stroke="#ffb020" stroke-dasharray="1 0.6" stroke-width="0.2"><title>keep-out {layer}</title></polygon>"##,
-                        pts(&z.outline)
+                        r##"<polygon class="zone keepout" points="{}" fill="none" stroke="#ffb020" stroke-dasharray="1 0.6" stroke-width="0.2"><title>keep-out {}</title></polygon>"##,
+                        pts(&z.outline),
+                        esc(layer)
                     );
                     continue;
                 }
                 let fills: Vec<&Vec<Point>> = z.fills.iter().filter(|(l, _)| l == layer).map(|(_, p)| p).collect();
                 let net = esc(&z.net);
                 for f in &fills {
-                    let _ = writeln!(o, r#"<polygon class="zone zone-{side}" points="{}" fill="currentColor" fill-opacity="0.38" data-net="{net}"><title>zone {net} {layer}</title></polygon>"#, pts(f));
+                    let _ = writeln!(o, r#"<polygon class="zone zone-{side}" points="{}" fill="currentColor" fill-opacity="0.38" data-net="{net}"><title>zone {net} {}</title></polygon>"#, pts(f), esc(layer));
                 }
-                let fill = if fills.is_empty() { r#"fill="currentColor" fill-opacity="0.18""# } else { r#"fill="none""# };
+                let fill = r#"fill="none""#;
                 let _ = writeln!(
                     o,
-                    r#"<polygon class="zone zone-{side}" points="{}" {fill} stroke="currentColor" stroke-width="0.15" stroke-dasharray="{}"><title>zone {net} {layer}</title></polygon>"#,
+                    r#"<polygon class="zone zone-{side}" points="{}" {fill} stroke="currentColor" stroke-width="0.15" stroke-dasharray="{}"><title>zone {net} {}</title></polygon>"#,
                     pts(&z.outline),
-                    if fills.is_empty() { "none" } else { "0.8 0.5" }
+                    if fills.is_empty() { "none" } else { "0.8 0.5" },
+                    esc(layer)
                 );
             }
             for t in board.tracks.iter().filter(|t| &t.layer == layer) {
@@ -279,12 +282,24 @@ pub fn svg(board: &Board, findings: &[Finding]) -> String {
     }
     for v in &board.vias {
         let net = esc(&v.net);
+        let stack: Vec<&str> = board.layers.iter().filter(|l| l.name.ends_with(".Cu")).map(|l| l.name.as_str()).collect();
+        let via_layers = if v.layers.len() >= 2 {
+            match (stack.iter().position(|l| *l == v.layers[0]), stack.iter().position(|l| *l == v.layers[1])) {
+                (Some(a), Some(b)) => stack[a.min(b)..=a.max(b)].join(" "),
+                _ => v.layers.join(" "),
+            }
+        } else if v.layers.is_empty() {
+            if stack.is_empty() { "F.Cu B.Cu".to_string() } else { stack.join(" ") }
+        } else {
+            v.layers.join(" ")
+        };
         let _ = writeln!(
             o,
-            r##"<circle class="via" cx="{:.2}" cy="{:.2}" r="{:.2}" fill="#bbb" data-net="{net}" data-item="via:{}"><title>via {net} · {}/{} mm</title></circle><circle class="hole" cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{BG}"/>"##,
+            r##"<circle class="via" cx="{:.2}" cy="{:.2}" r="{:.2}" fill="#bbb" data-net="{net}" data-layers="{}" data-item="via:{}"><title>via {net} · {}/{} mm</title></circle><circle class="hole" cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{BG}"/>"##,
             v.x,
             v.y,
             v.size / 2.0,
+            esc(&via_layers),
             esc(&v.id),
             v.size,
             v.drill,

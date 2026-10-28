@@ -3,9 +3,9 @@
 //! window answers through the `app_reply` command.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,6 +14,17 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 type Reply = Result<Value, String>;
+const MAX_CONNECTIONS: usize = 32;
+const MAX_REQUEST_BYTES: usize = 64 * 1024;
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+struct ConnectionPermit(Arc<AtomicUsize>);
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
+}
 
 pub struct Bridge {
     pub addr: String,
@@ -45,10 +56,16 @@ pub fn start(app: AppHandle) -> std::io::Result<Arc<Bridge>> {
         next: AtomicU64::new(1),
     });
     let b = bridge.clone();
+    let active = Arc::new(AtomicUsize::new(0));
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
+            if active.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < MAX_CONNECTIONS).then_some(n + 1)).is_err() {
+                continue;
+            }
             let (b, app) = (b.clone(), app.clone());
+            let permit = ConnectionPermit(active.clone());
             std::thread::spawn(move || {
+                let _permit = permit;
                 let _ = serve(&b, &app, stream);
             });
         }
@@ -57,9 +74,13 @@ pub fn start(app: AppHandle) -> std::io::Result<Arc<Bridge>> {
 }
 
 fn serve(bridge: &Bridge, app: &AppHandle, stream: TcpStream) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(READ_TIMEOUT))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
-    reader.read_line(&mut line)?;
+    let bytes = reader.take((MAX_REQUEST_BYTES + 1) as u64).read_line(&mut line)?;
+    if bytes > MAX_REQUEST_BYTES {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "request is too large"));
+    }
     let req: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
     let reply = if req.get("token").and_then(Value::as_str) != Some(bridge.token.as_str()) {
         Err("not authorized".to_string())

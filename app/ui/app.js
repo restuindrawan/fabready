@@ -139,11 +139,12 @@
   editor = window.FabreadyEditor({
     invoke, esc, icon, store, canvas,
     path: () => state.path,
+    revision: () => state.payload && state.payload.token,
     previewing: () => !!state.preview,
     changed: () => chat.refresh(),
     recheck: () => check(),
-    recordEdits: (done) => recordEdits(done),
-    recordUndo: (verb, label) => chat.event(state.path, { agent: `The user ${verb.toLowerCase()} a change: ${label}.`, user: `${verb}: ${label}.` }),
+    recordEdits: (path, done) => recordEdits(path, done),
+    recordUndo: (path, verb, label) => chat.event(path, { agent: `The user ${verb.toLowerCase()} a change: ${label}.`, user: `${verb}: ${label}.` }),
     ask: (infos) => { openChat(); chat.askItems(infos.map((i) => ({ info: i, text: editor.describe(i) }))); },
   });
 
@@ -217,7 +218,7 @@
   function renderInspector() {
     if (!state.payload) return;
     const body = $("ins-body");
-    const agent = state.tab === "agent";
+    const agent = state.tab === "agent" && !state.preview;
     body.hidden = agent;
     $("chat").hidden = !agent;
     if (agent) {
@@ -333,6 +334,8 @@
   async function openProject(path) {
     if (!path) return;
     if (dirty()) toast(`Unsaved settings for ${basename(state.path)} were discarded.`);
+    state.preview = null;
+    $("preview-bar").hidden = true;
     state.path = path;
     editor.projectChanged();
     state.active = null;
@@ -369,10 +372,12 @@
   async function startPreview(ids, quiet) {
     if (!state.path) return null;
     if (quiet && state.preview) throw new Error("A fix preview is already open; the user has to apply or cancel it first.");
+    const path = state.path;
     busy(true);
     try {
-      const p = await invoke("preview_fixes", { path: state.path, fixes: ids });
-      state.preview = Object.assign({ ids }, p);
+      const p = await invoke("preview_fixes", { path, fixes: ids });
+      if (path !== state.path) return null;
+      state.preview = Object.assign({ ids, path }, p);
       state.active = null;
       const after = p.report.summary;
       $("pv-title").textContent = p.changes.length === 1 ? p.changes[0].title : `${p.changes.length} fixes`;
@@ -397,7 +402,7 @@
 
   function endPreview(cancelled) {
     if (cancelled === true && state.preview) {
-      chat.event(state.path, { agent: "The user cancelled the fix preview you proposed.", user: "Cancelled the proposed fix." }, { proposalOnly: true });
+      chat.event(state.preview.path, { agent: "The user cancelled the fix preview you proposed.", user: "Cancelled the proposed fix." }, { proposalOnly: true });
     }
     state.preview = null;
     $("preview-bar").hidden = true;
@@ -408,28 +413,30 @@
   async function applyPreview() {
     const p = state.preview;
     if (!p) return;
+    const path = p.path;
+    const manual = p.ids.every(isEdit);
     try {
-      const done = await invoke("apply_fixes", { path: state.path, fixes: p.ids, token: p.token });
-      endPreview();
+      const done = await invoke("apply_fixes", { path, fixes: p.ids, token: p.token });
+      if (manual) recordEdits(path, done);
       const n = done.changes.length;
-      const manual = p.ids.every(isEdit);
+      editor.pushUndo(manual ? done.changes.map((c) => c.title).join(" · ") : `${n} automatic fix${n === 1 ? "" : "es"}`, done, path);
+      if (state.path !== path || state.preview !== p) return;
+      endPreview();
       const what = manual ? `${done.changes.map((c) => c.title).join(" · ")} · errors ${done.before.error} → ${done.after.error}`
         : `Applied ${n} fix${n === 1 ? "" : "es"} · errors ${done.before.error} → ${done.after.error}`;
-      if (manual) recordEdits(done);
-      else {
-        chat.event(state.path, {
+      if (!manual) {
+        chat.event(path, {
           agent: `The user applied ${n} automatic fix${n === 1 ? "" : "es"} (${done.changes.map((c) => c.title).join("; ")}); errors ${done.before.error} → ${done.after.error}.`,
           user: what + ".",
         });
       }
-      chat.settled(state.path);
-      editor.pushUndo(manual ? done.changes.map((c) => c.title).join(" · ") : `${n} automatic fix${n === 1 ? "" : "es"}`, done);
+      chat.settled(path);
       toast(`${what}. If the board is open in KiCad, reload it (File → Revert).`,
         null, { label: "Undo", run: () => editor.undo() });
       await check();
     } catch (e) {
-      toast(String(e), "error");
-      if (/changed since the preview/.test(String(e))) endPreview();
+      if (state.path === path && state.preview === p) toast(String(e), "error");
+      if (state.path === path && state.preview === p && /changed since the preview/.test(String(e))) endPreview();
     }
   }
 
@@ -437,11 +444,11 @@
   const isEdit = (id) => /^(edit|delete|add):/.test(id);
 
   /** Remember manual edits for the agent (app_state, and its next message). */
-  function recordEdits(done) {
-    const log = (state.edits[state.path] = state.edits[state.path] || []);
+  function recordEdits(path, done) {
+    const log = (state.edits[path] = state.edits[path] || []);
     for (const c of done.changes) log.push({ title: c.title, detail: c.detail, at: new Date().toISOString(), backup: done.backup });
     const list = done.changes.map((c) => `${c.title} (${c.detail})`).join("; ");
-    chat.event(state.path, {
+    chat.event(path, {
       agent: `The user edited the board by hand: ${list}. Errors ${done.before.error} → ${done.after.error}.`,
       user: `Edited by hand: ${done.changes.map((c) => c.title).join(" · ")}.`,
     });

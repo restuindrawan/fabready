@@ -220,6 +220,7 @@ pub struct Via {
     pub size: f64,
     pub drill: f64,
     pub net: String,
+    pub layers: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -655,6 +656,10 @@ pub fn parse_board(text: &str) -> Result<Board> {
                 size: v.value_f64("size").unwrap_or(0.6),
                 drill: v.value_f64("drill").unwrap_or(0.3),
                 net: net_name(v, &nets),
+                layers: v
+                    .child("layers")
+                    .map(|l| l.items()[1..].iter().filter_map(Sexp::atom).map(str::to_string).collect())
+                    .unwrap_or_else(|| vec!["F.Cu".into(), "B.Cu".into()]),
             }
         })
         .collect();

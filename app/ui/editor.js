@@ -15,7 +15,7 @@ window.FabreadyEditor = function createEditor(d) {
   let sel = { items: [], infos: [], token: null, draft: {}, problem: null }; // picked board items
   let busy = false;
   const history = {}; // project path -> {undo: [], redo: []}
-  const hist = () => (history[d.path()] = history[d.path()] || { undo: [], redo: [] });
+  const hist = (path = d.path()) => (history[path] = history[path] || { undo: [], redo: [] });
   const settings = Object.assign({ layer: "F.Cu", width: "0.25", viaSize: "0.6", viaDrill: "0.3" }, store.get("editTools", {}));
   const saveSettings = () => store.set("editTools", settings);
 
@@ -281,7 +281,7 @@ window.FabreadyEditor = function createEditor(d) {
       const items = e.shiftKey ? [...sel.items, item] : [item];
       setSelection(items);
     }
-    dragging = { items: sel.items.filter(movable) };
+    dragging = { items: sel.items.filter(movable), token: d.revision() };
   }
   function onDragMove(dx, dy, e) {
     if (!dragging) return;
@@ -297,14 +297,14 @@ window.FabreadyEditor = function createEditor(d) {
     const dr = dragging;
     dragging = null;
     if (!dr || (!dr.dx && !dr.dy)) { canvas.ghost(null); status(""); return; }
-    move(dr.items, dr.dx, dr.dy);
+    move(dr.items, dr.dx, dr.dy, dr.token);
   }
 
-  function move(items, dx, dy) {
+  function move(items, dx, dy, token) {
     if (!items.length || (!dx && !dy)) return;
     const ids = items.map((i) => `edit:${i}:move=${r4(dx)},${r4(dy)}`);
     const label = items.length === 1 ? `Move ${shortName(items[0])}` : `Move ${items.length} items`;
-    commit(ids, label).finally(() => canvas.ghost(null));
+    commit(ids, label, token).finally(() => canvas.ghost(null));
   }
   function shortName(item) {
     const i = sel.infos.find((x) => x.item === item);
@@ -317,7 +317,7 @@ window.FabreadyEditor = function createEditor(d) {
   function nudgeBy(dx, dy) {
     const items = sel.items.filter(movable);
     if (!items.length) return;
-    nudge = nudge || { items, dx: 0, dy: 0 };
+    nudge = nudge || { items, dx: 0, dy: 0, token: d.revision() };
     nudge.dx = r4(nudge.dx + dx);
     nudge.dy = r4(nudge.dy + dy);
     canvas.ghost(nudge.items, nudge.dx, nudge.dy);
@@ -326,7 +326,7 @@ window.FabreadyEditor = function createEditor(d) {
     nudge.timer = setTimeout(() => {
       const n = nudge;
       nudge = null;
-      move(n.items, n.dx, n.dy);
+      move(n.items, n.dx, n.dy, n.token);
     }, 450);
   }
 
@@ -339,31 +339,39 @@ window.FabreadyEditor = function createEditor(d) {
   function deleteSelected() {
     const items = sel.items.filter((i) => /^(track|via):/.test(i));
     if (!items.length) return status("Footprints can't be deleted here; remove them in the schematic.");
+    const path = d.path();
     const skipped = sel.items.length - items.length;
     commit(items.map((i) => `delete:${i}`), items.length === 1 ? `Delete ${shortName(items[0])}` : `Delete ${items.length} items`)
-      .then((ok) => { if (ok && skipped) status(`Deleted ${items.length}; footprints stay (remove them in the schematic).`); });
+      .then((ok) => { if (ok && skipped && d.path() === path) status(`Deleted ${items.length}; footprints stay (remove them in the schematic).`); });
   }
 
   // ------------------------------------------------------------ writing + history
   /** Write edit ids as one undo step. Resolves true when written. */
   async function commit(ids, label, token) {
-    if (!ids.length || busy || !d.path()) return false;
+    const path = d.path();
+    const selection = sel;
+    token = token || d.revision();
+    if (!ids.length || busy || !path || !token || d.previewing()) return false;
     busy = true;
     renderBar();
     try {
-      const done = await invoke("apply_edits", { path: d.path(), edits: ids, token: token || null });
+      const done = await invoke("apply_edits", { path, edits: ids, token });
       label = label || done.changes.map((c) => c.title).join(" · ");
-      pushUndo(label, done);
-      d.recordEdits(done);
+      pushUndo(label, done, path);
+      d.recordEdits(path, done);
+      if (d.path() !== path) return true;
       const delta = done.before.error === done.after.error ? `${done.after.error} error${done.after.error === 1 ? "" : "s"}` : `errors ${done.before.error} → ${done.after.error}`;
       status(`${label} · ${delta}`);
-      if (ids.some((i) => i.startsWith("delete:"))) await setSelection(sel.items.filter((i) => !ids.includes(`delete:${i}`)));
-      sel.problem = null;
+      if (sel === selection && ids.some((i) => i.startsWith("delete:"))) await setSelection(sel.items.filter((i) => !ids.includes(`delete:${i}`)));
+      if (sel === selection) sel.problem = null;
       busy = false;
-      await d.recheck();
-      await loadInfos();
+      if (d.path() === path) {
+        await d.recheck();
+        if (d.path() === path) await loadInfos();
+      }
       return true;
     } catch (e) {
+      if (d.path() !== path) return false;
       busy = false;
       sel.problem = String(e);
       status(String(e));
@@ -376,8 +384,8 @@ window.FabreadyEditor = function createEditor(d) {
   }
 
   /** Record a written change (also used by the fix preview's Apply). */
-  function pushUndo(label, done) {
-    const h = hist();
+  function pushUndo(label, done, path = d.path()) {
+    const h = hist(path);
     h.undo.push({ label, backup: done.backup, token: done.token });
     if (h.undo.length > 100) h.undo.shift();
     h.redo = [];
@@ -385,23 +393,27 @@ window.FabreadyEditor = function createEditor(d) {
   }
 
   async function step(from, to, verb) {
-    const h = hist();
+    if (busy) return;
+    const path = d.path();
+    const h = hist(path);
     const entry = h[from].pop();
-    if (!entry || busy) return;
+    if (!entry || !path) return;
     busy = true;
     renderBar();
     try {
-      const r = await invoke("swap_backup", { path: d.path(), backup: entry.backup, token: entry.token });
+      const r = await invoke("swap_backup", { path, backup: entry.backup, token: entry.token });
       h[to].push({ label: entry.label, backup: r.backup, token: r.token });
-      status(`${verb}: ${entry.label}`);
-      d.recordUndo(verb, entry.label);
+      if (d.path() === path) status(`${verb}: ${entry.label}`);
+      d.recordUndo(path, verb, entry.label);
       busy = false;
-      await d.recheck();
-      await loadInfos();
+      if (d.path() === path) {
+        await d.recheck();
+        if (d.path() === path) await loadInfos();
+      }
     } catch (e) {
       // The board changed elsewhere; older steps can't be replayed safely either.
       h[from] = [];
-      status(String(e));
+      if (d.path() === path) status(String(e));
     } finally {
       busy = false;
       renderBar();
@@ -470,6 +482,7 @@ window.FabreadyEditor = function createEditor(d) {
   }
 
   function onTool(type, pt, e) {
+    if (d.previewing()) return;
     if (tool === "route") return routeTool(type, pt, e);
     if (tool === "via") return viaTool(type, pt, e);
     if (tool === "measure") return measureTool(type, pt, e);
@@ -483,7 +496,7 @@ window.FabreadyEditor = function createEditor(d) {
     if (type === "dblclick") return finishRoute();
     if (type !== "down") return;
     if (!route) {
-      route = { net: snap ? snap.net : "", runs: [{ layer, pts: [p] }], vias: [], cursor: p };
+      route = { net: snap ? snap.net : "", runs: [{ layer, pts: [p] }], vias: [], cursor: p, token: d.revision(), anchor: snap };
       status(route.net ? `Routing ${route.net} on ${layer}` : `Routing on ${layer} (no net yet; start on a pad to pick one)`, true);
       return drawTool(p, snap);
     }
@@ -508,6 +521,15 @@ window.FabreadyEditor = function createEditor(d) {
     renderBar();
     // Nothing routed on this layer yet: just carry on from the same point on the other layer.
     if (run.pts.length === 1) {
+      const startConnects = !route.anchor || (route.anchor.layers
+        ? route.anchor.layers.includes(next)
+        : route.anchor.layer === "*" || route.anchor.layer === next);
+      if (!startConnects) {
+        settings.layer = run.layer;
+        saveSettings();
+        renderBar();
+        return status(`The starting ${route.anchor.kind} only connects on ${route.anchor.layer}; finish this route before switching layers.`, true);
+      }
       run.layer = next;
       status(`Now on ${next}`, true);
       return drawTool(route.cursor);
@@ -531,7 +553,7 @@ window.FabreadyEditor = function createEditor(d) {
     const ids = r.runs.filter((run) => run.pts.length > 1).map((run) => `add:track:${run.layer}:${w}:${run.pts.map((p) => p.join(",")).join(";")}:${r.net}`);
     ids.push(...r.vias.map((v) => `add:via:${v.join(",")}:${settings.viaSize}:${settings.viaDrill}:${r.net}`));
     if (!ids.some((i) => i.startsWith("add:track"))) return status("");
-    commit(ids, `Route ${r.net || "track"}`);
+    commit(ids, `Route ${r.net || "track"}`, r.token);
   }
 
   function viaTool(type, pt, e) {
@@ -540,7 +562,7 @@ window.FabreadyEditor = function createEditor(d) {
     if (type === "move") return drawTool(p, snap);
     if (type !== "down") return;
     const net = (snap && snap.net) || (canvas.trackAt(p, canvas.scale() * 3) || {}).net || "";
-    commit([`add:via:${p.join(",")}:${settings.viaSize}:${settings.viaDrill}:${net}`], `Add via${net ? " on " + net : ""}`);
+    commit([`add:via:${p.join(",")}:${settings.viaSize}:${settings.viaDrill}:${net}`], `Add via${net ? " on " + net : ""}`, d.revision());
   }
 
   function measureTool(type, pt, e) {
@@ -628,7 +650,16 @@ window.FabreadyEditor = function createEditor(d) {
       if (sel.items.length && !busy && !pendingEdits().length) loadInfos();
     },
     clear() { cancelRoute(); measure = null; return setSelection([]); },
-    projectChanged() { cancelRoute(); measure = null; setSelection([]); renderBar(); },
+    projectChanged() {
+      cancelRoute();
+      measure = null;
+      clearTimeout(nudge && nudge.timer);
+      nudge = null;
+      dragging = null;
+      canvas.ghost(null);
+      setSelection([]);
+      renderBar();
+    },
     hasSelection: () => sel.items.length > 0,
     /** For the agent: what's selected, described. */
     selection: () => (sel.infos.length ? { infos: sel.infos, info: sel.infos[0], text: sel.infos.map(describe).join("; ") } : null),

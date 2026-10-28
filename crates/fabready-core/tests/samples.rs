@@ -57,9 +57,66 @@ fn svg_has_layers_and_markers() {
     // Every layer is its own group: silkscreen shows by default, fabrication is off until turned on.
     assert!(result.svg.contains(r#"data-layer="F.SilkS""#));
     assert!(result.svg.contains(r##"data-layer="F.Fab" data-label="Front fabrication" color="#a7a7b0" display="none""##));
+    assert!(result.svg.contains(r#"class="zone zone-f" points="#) && result.svg.contains(r#"fill="none" stroke="currentColor""#));
+    assert!(!result.svg.contains(r#"fill-opacity="0.18""#), "unfilled zones must not be shown as copper");
     assert!(result.svg.contains(">SW1</text>"));
     // Board items can be picked in the app.
     assert!(result.svg.contains(r#"data-item="track:"#) && result.svg.contains(r#"data-item="via:"#) && result.svg.contains(r#"data-item="fp:"#));
+}
+
+#[test]
+fn svg_escapes_layer_values_and_exposes_via_spans() {
+    use fabready_core::{board, render};
+    let mut b = board::load(&sample("macropad-buggy/macropad-buggy.kicad_pcb")).unwrap();
+    let via = &b.vias[0];
+    assert_eq!(via.layers, ["F.Cu", "B.Cu"]);
+    let malicious = r#"F.Cu" onload="x.Cu"#;
+    b.layers.push(board::LayerInfo { name: malicious.into(), kind: "signal".into(), user_name: String::new() });
+    let back = b.layers.iter().position(|l| l.name == "B.Cu").unwrap();
+    b.layers.splice(
+        back..back,
+        [
+            board::LayerInfo { name: "In1.Cu".into(), kind: "signal".into(), user_name: String::new() },
+            board::LayerInfo { name: "In2.Cu".into(), kind: "signal".into(), user_name: String::new() },
+        ],
+    );
+    let mut through_via = b.vias[0].clone();
+    through_via.id = "through-test".into();
+    b.vias.push(through_via);
+    b.vias[0].layers = vec!["In1.Cu".into(), "In2.Cu".into()];
+    for zone in &mut b.zones {
+        zone.layers = vec![malicious.into()];
+        zone.fills = vec![(malicious.into(), vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)])];
+    }
+    let svg = render::svg(&b, &[]);
+    let escaped_id = render::esc(&format!("L-{}", malicious.replace('.', "_")));
+    assert!(svg.contains(&format!(r#"id="{escaped_id}""#)));
+    assert!(svg.contains(&format!(r#"data-layer="{}""#, render::esc(malicious))));
+    assert!(svg.contains(&format!("zone GND {}", render::esc(malicious))));
+    assert!(svg.contains(r#"data-layers="In1.Cu In2.Cu""#));
+    assert!(svg.contains(r#"data-layers="F.Cu In1.Cu In2.Cu B.Cu""#));
+    assert!(!svg.contains(r#"id="L-F_Cu" onload="x_Cu""#));
+}
+
+#[test]
+fn copper_geometry_edits_clear_saved_zone_fills() {
+    use fabready_core::{board, fixes};
+    let dir = std::env::temp_dir().join(format!("fabready-zone-fill-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pcb = dir.join("b.kicad_pcb");
+    let mut source = std::fs::read_to_string(sample("macropad-buggy/macropad-buggy.kicad_pcb")).unwrap();
+    let zone = source.find("(zone ").unwrap();
+    let polygon = source[zone..].find("(polygon (pts").unwrap() + zone;
+    source.insert_str(polygon, r#"(filled_polygon (layer "F.Cu") (pts (xy 100.5 100.5) (xy 186.5 100.5) (xy 186.5 157.5) (xy 100.5 157.5))) "#);
+    std::fs::write(&pcb, &source).unwrap();
+    let b = board::load(&pcb).unwrap();
+    assert!(!b.zones[0].fills.is_empty());
+    let track = &b.tracks[0];
+    let preview = fixes::preview(&dir, &Options { use_kicad: false, ..Default::default() }, &[format!("edit:track:{}:width=0.3", track.id)]).unwrap();
+    assert!(!preview.after.svg.contains(r#"fill-opacity="0.38""#), "stale saved copper is not rendered");
+    assert!(preview.changes[0].detail.contains("run KiCad DRC before fabrication"));
+    assert!(std::fs::read_to_string(&pcb).unwrap().contains("(filled_polygon"), "preview does not write");
+    std::fs::remove_dir_all(dir).ok();
 }
 
 #[test]
@@ -85,8 +142,7 @@ fn manual_edits_are_surgical_and_undoable() {
     let edits = ids(&[
         format!("edit:track:{}:width=0.3", track.id),
         format!("edit:via:{}:size=0.8", via.id),
-        format!("edit:via:{}:drill=0.4", via.id),
-        format!("edit:fp:{}:at={},{},90", sw5.id, sw5.x + 1.0, sw5.y),
+        format!("edit:via:{}:drill=0.7", via.id),
         format!("edit:fp:{}:reference=SW15", sw5.id),
     ]);
     let preview = fixes::preview(&dir, &opts, &edits).unwrap();
@@ -99,13 +155,8 @@ fn manual_edits_are_surgical_and_undoable() {
     let after = board::load(&pcb).unwrap();
     assert_eq!(after.tracks.iter().find(|t| t.id == track.id).unwrap().width, 0.3);
     let v = after.vias.iter().find(|v| v.id == via.id).unwrap();
-    assert_eq!((v.size, v.drill), (0.8, 0.4));
-    let moved = after.footprint("SW15").expect("renamed");
-    assert_eq!((moved.x, moved.angle), (sw5.x + 1.0, 90.0));
-    // Pad angles in the file include the footprint's rotation, so they turned with it.
-    assert!(moved.pads.iter().all(|p| p.angle == 90.0));
-    let (p0, q0) = (&sw5.pads[0], &moved.pads[0]);
-    assert!(((q0.x - moved.x) - (p0.y - sw5.y)).abs() < 1e-6 && ((q0.y - moved.y) + (p0.x - sw5.x)).abs() < 1e-6, "pads rotate about the footprint");
+    assert_eq!((v.size, v.drill), (0.8, 0.7));
+    assert!(after.footprint("SW15").is_some(), "footprint rename applied");
 
     // Deleting a track removes its line and nothing else.
     let del = ids(&[format!("delete:track:{}", track.id)]);
@@ -117,11 +168,18 @@ fn manual_edits_are_surgical_and_undoable() {
         format!("edit:via:{}:drill=0.9", via.id),
         format!("edit:track:{}:layer=F.SilkS", b.tracks[1].id),
         format!("edit:fp:{}:reference=SW1", after.footprint("SW15").unwrap().id),
+        format!("edit:fp:{}:move=1,0", sw5.id),
         format!("edit:track:{}:width=0", b.tracks[1].id),
         "edit:track:nope:width=0.3".to_string(),
     ] {
         assert!(fixes::preview(&dir, &opts, &ids(std::slice::from_ref(&bad))).is_err(), "{bad}");
     }
+    assert!(fixes::preview(
+        &dir,
+        &opts,
+        &ids(&[format!("edit:via:{}:size=0.4", via.id), format!("edit:via:{}:drill=0.5", via.id)])
+    )
+    .is_err(), "combined via dimensions must be validated");
 
     fixes::restore(&dir, std::path::Path::new(&applied.backup)).unwrap();
     assert_eq!(std::fs::read_to_string(&pcb).unwrap(), original);
@@ -184,6 +242,27 @@ fn drag_route_and_undo_redo() {
     assert!(fixes::preview(&dir, &opts, &["add:track:F.Cu:0.3:1,1;2,2:NO_SUCH_NET".to_string()]).is_err());
     assert!(fixes::preview(&dir, &opts, &["add:via:1,1:0.3:0.6:".to_string()]).is_err());
     std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn via_moves_refuse_tracks_that_pass_through_the_via() {
+    use fabready_core::{board, edit, sexpr};
+    let text = std::fs::read_to_string(sample("macropad-buggy/macropad-buggy.kicad_pcb")).unwrap();
+    let root = sexpr::parse(&text).unwrap();
+    let b = board::parse_board(&text).unwrap();
+    let via = b.vias[0].clone();
+    let node = root.children("via").next().unwrap();
+    let net = node.child("net").and_then(|n| n.arg(1)).unwrap();
+    let (x, y) = (via.x, via.y);
+    let injected = format!(
+        "\n(segment (start {} {}) (end {} {}) (width 0.25) (layer \"F.Cu\") (net {net}) (uuid \"move-test-track\"))\n",
+        x - 1.0, y, x + 1.0, y
+    );
+    let mut changed = text.clone();
+    changed.insert_str(root.span().end - 1, &injected);
+    let changed_root = sexpr::parse(&changed).unwrap();
+    let changed_board = board::parse_board(&changed).unwrap();
+    assert!(edit::plan(&changed, &changed_root, &changed_board, &format!("edit:via:{}:move=1,0", via.id)).is_err());
 }
 
 #[test]

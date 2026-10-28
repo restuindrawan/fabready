@@ -16,7 +16,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 
-use crate::board::{arc_points, item_id, layer_of, net_name, net_table, rotate, Board, Point};
+use crate::board::{arc_points, item_id, layer_of, net_name, net_table, point_in_polygon, point_segment_distance, rotate, segment_distance, Board, Pad, Point};
 use crate::fixes::{atom_edit, mm, uuid_for, Change, Edit, Highlight, Plan};
 use crate::sexpr::{self, Sexp};
 
@@ -72,6 +72,14 @@ fn track_points(node: &Sexp) -> Vec<Point> {
     }
 }
 
+fn connection_points(node: &Sexp) -> Vec<Point> {
+    if node.head() == Some("arc") {
+        arc_points(node.child_xy("start"), node.child_xy("mid"), node.child_xy("end"), 64)
+    } else {
+        track_points(node)
+    }
+}
+
 /// Replace a whole child list such as `(at 1 2 90)`.
 fn replace_child(node: &Sexp, key: &str, text: String) -> Result<Edit> {
     let c = node.child(key).ok_or_else(|| anyhow!("item has no ({key} ...)"))?;
@@ -96,7 +104,7 @@ fn at_with_angle(at: &Sexp, angle: f64) -> String {
 }
 
 /// Remove a node, and its line too when it sits on a line of its own.
-fn delete_node(text: &str, node: &Sexp) -> Edit {
+pub(crate) fn delete_node(text: &str, node: &Sexp) -> Edit {
     let (mut start, mut end) = (node.span().start, node.span().end);
     let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
     if text[line_start..start].trim().is_empty() && text[end..].starts_with('\n') {
@@ -120,6 +128,7 @@ pub fn plan(text: &str, root: &Sexp, board: &Board, id: &str) -> Result<Plan> {
     if id.starts_with("add:") {
         return plan_add(text, root, board, id);
     }
+
     let mut parts = id.splitn(4, ':');
     let (op, kind, item) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let node = find(root, kind, item)?;
@@ -171,11 +180,8 @@ pub fn plan(text: &str, root: &Sexp, board: &Board, id: &str) -> Result<Plan> {
             let v = number(value, if prop == "size" { "Diameter" } else { "Drill" })?;
             let (size, drill) = (node.value_f64("size").unwrap_or(0.6), node.value_f64("drill").unwrap_or(0.3));
             let (new_size, new_drill) = if prop == "size" { (v, drill) } else { (size, v) };
-            if new_drill <= 0.0 || new_size > 10.0 {
+            if v <= 0.0 || v > 10.0 || new_size > 10.0 || new_drill > 10.0 {
                 bail!("Via sizes must be positive and under 10 mm");
-            }
-            if new_drill >= new_size {
-                bail!("The drill ({} mm) must be smaller than the via ({} mm)", mm(new_drill), mm(new_size));
             }
             let edit = atom_edit(node, prop, mm(v)).ok_or_else(|| anyhow!("via has no {prop}"))?;
             let (x, y) = node.child_xy("at");
@@ -193,9 +199,9 @@ pub fn plan(text: &str, root: &Sexp, board: &Board, id: &str) -> Result<Plan> {
             let (a, b) = (number(a, "X")?, number(b, "Y")?);
             let old = node.child_xy("at");
             let (x, y) = if prop == "move" { (old.0 + a, old.1 + b) } else { (a, b) };
-            let net = net_name(node, &nets);
             let mut edits = vec![replace_child(node, "at", format!("(at {} {})", mm(x), mm(y)))?];
-            let follow = follow_edits(root, &nets, &[(old, (x, y), net)]);
+            let via = board.vias.iter().find(|v| v.id == item).ok_or_else(|| anyhow!("that via isn't on the board any more"))?;
+            let follow = follow_via_edits(root, &nets, board, via, (x, y))?;
             let n = follow.len();
             edits.extend(follow);
             Ok(Plan {
@@ -249,6 +255,23 @@ pub fn plan(text: &str, root: &Sexp, board: &Board, id: &str) -> Result<Plan> {
     }
 }
 
+pub(crate) fn validate_batch(root: &Sexp, ids: &[String]) -> Result<()> {
+    for id in ids {
+        let Some(rest) = id.strip_prefix("edit:via:") else { continue };
+        let Some((item, property)) = rest.split_once(':') else { continue };
+        if !property.starts_with("size=") && !property.starts_with("drill=") {
+            continue;
+        }
+        let node = find(root, "via", item)?;
+        let size = node.value_f64("size").unwrap_or(0.6);
+        let drill = node.value_f64("drill").unwrap_or(0.3);
+        if size <= 0.0 || drill <= 0.0 || size > 10.0 || drill > 10.0 || drill >= size {
+            bail!("The final via dimensions ({}/{}) mm are invalid; the drill must be smaller than the via", mm(size), mm(drill));
+        }
+    }
+    Ok(())
+}
+
 fn followed(n: usize) -> String {
     match n {
         0 => String::new(),
@@ -257,22 +280,117 @@ fn followed(n: usize) -> String {
     }
 }
 
-/// Track ends sitting on a moved pad or via (same net) move with it. Arcs are left alone: moving one end would
-/// bend them in ways nobody asked for.
-fn follow_edits(root: &Sexp, nets: &std::collections::HashMap<i64, String>, moves: &[(Point, Point, String)]) -> Vec<Edit> {
-    let close = |a: Point, b: Point| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+struct PadMove {
+    pad: Pad,
+    old_fp: (f64, f64, f64),
+    new_fp: (f64, f64, f64),
+}
+
+fn transformed(p: Point, old: (f64, f64, f64), new: (f64, f64, f64)) -> Point {
+    let local = rotate(p.0 - old.0, p.1 - old.1, -old.2);
+    let moved = rotate(local.0, local.1, new.2);
+    (new.0 + moved.0, new.1 + moved.1)
+}
+
+fn near_pad(p: Point, pad: &Pad, margin: f64) -> bool {
+    let poly = pad.polygon();
+    point_in_polygon(p, &poly)
+        || (0..poly.len()).any(|i| point_segment_distance(p, poly[i], poly[(i + 1) % poly.len()]) <= margin)
+}
+
+fn line_near_pad(a: Point, b: Point, pad: &Pad, margin: f64) -> bool {
+    let poly = pad.polygon();
+    point_in_polygon(a, &poly)
+        || point_in_polygon(b, &poly)
+        || (0..poly.len()).any(|i| segment_distance(a, b, poly[i], poly[(i + 1) % poly.len()]) <= margin)
+}
+
+fn follow_pad_edits(root: &Sexp, nets: &std::collections::HashMap<i64, String>, moves: &[PadMove]) -> Result<Vec<Edit>> {
     let mut out = Vec::new();
-    for seg in root.children("segment") {
-        let net = net_name(seg, nets);
-        for key in ["start", "end"] {
-            let Some(c) = seg.child(key) else { continue };
-            let p = c.xy();
-            if let Some((_, to, _)) = moves.iter().find(|(from, _, n)| *n == net && close(*from, p)) {
-                out.push(Edit { start: c.span().start, end: c.span().end, text: format!("({key} {} {})", mm(to.0), mm(to.1)) });
+    for node in root.children("segment").chain(root.children("arc")) {
+        let net = net_name(node, nets);
+        let layer = layer_of(node);
+        let points = connection_points(node);
+        let margin = node.value_f64("width").unwrap_or(0.25) / 2.0;
+        let relevant: Vec<&PadMove> = moves
+            .iter()
+            .filter(|m| m.pad.net == net && m.pad.on_layer(&layer) && points.windows(2).any(|p| line_near_pad(p[0], p[1], &m.pad, margin)))
+            .collect();
+        if relevant.is_empty() {
+            continue;
+        }
+        if node.head() == Some("arc") {
+            bail!("can't move a footprint connected to an arc; reroute that connection first");
+        }
+        let connected_endpoints: Vec<(&str, &Sexp, &PadMove)> = ["start", "end"]
+            .into_iter()
+            .filter_map(|key| node.child(key).map(|coord| (key, coord)))
+            .filter_map(|(key, coord)| {
+                relevant.iter().find(|m| near_pad(coord.xy(), &m.pad, margin)).map(|m| (key, coord, *m))
+            })
+            .collect();
+        for pad in &relevant {
+            if !connected_endpoints.iter().any(|(_, _, m)| std::ptr::eq(*m, *pad)) {
+                bail!("can't move a footprint connected to the middle of a track ({} on {}, pad at {},{}, track {:?}); reroute that connection first",
+                    pad.pad.number, layer, mm(pad.pad.x), mm(pad.pad.y), points);
             }
         }
+        for (key, coord, pad) in connected_endpoints {
+            let p = transformed(coord.xy(), pad.old_fp, pad.new_fp);
+            out.push(Edit { start: coord.span().start, end: coord.span().end, text: format!("({key} {} {})", mm(p.0), mm(p.1)) });
+        }
     }
-    out
+    Ok(out)
+}
+
+fn via_reaches_layer(board: &Board, layers: &[String], layer: &str) -> bool {
+    let stack: Vec<&str> = board.layers.iter().filter(|l| l.name.ends_with(".Cu")).map(|l| l.name.as_str()).collect();
+    if layers.len() < 2 {
+        return layers.iter().any(|l| l == layer);
+    }
+    match (stack.iter().position(|l| *l == layers[0]), stack.iter().position(|l| *l == layers[1])) {
+        (Some(a), Some(b)) => stack[a.min(b)..=a.max(b)].contains(&layer),
+        _ => layers.iter().any(|l| l == layer),
+    }
+}
+
+fn follow_via_edits(
+    root: &Sexp,
+    nets: &std::collections::HashMap<i64, String>,
+    board: &Board,
+    via: &crate::board::Via,
+    new: Point,
+) -> Result<Vec<Edit>> {
+    let mut out = Vec::new();
+    let old = (via.x, via.y);
+    for node in root.children("segment").chain(root.children("arc")) {
+        let layer = layer_of(node);
+        if net_name(node, nets) != via.net || !via_reaches_layer(board, &via.layers, &layer) {
+            continue;
+        }
+        let radius = via.size / 2.0 + node.value_f64("width").unwrap_or(0.25) / 2.0;
+        let points = connection_points(node);
+        if !points.windows(2).any(|p| segment_distance(old, old, p[0], p[1]) <= radius) {
+            continue;
+        }
+        if node.head() == Some("arc") {
+            bail!("can't move a via connected to an arc; reroute that connection first");
+        }
+        let mut connected = false;
+        for key in ["start", "end"] {
+            let Some(coord) = node.child(key) else { continue };
+            let p = coord.xy();
+            if (p.0 - old.0).hypot(p.1 - old.1) <= radius {
+                connected = true;
+                let moved = (p.0 + new.0 - old.0, p.1 + new.1 - old.1);
+                out.push(Edit { start: coord.span().start, end: coord.span().end, text: format!("({key} {} {})", mm(moved.0), mm(moved.1)) });
+            }
+        }
+        if !connected {
+            bail!("can't move a via where a track passes through it; reroute that connection first");
+        }
+    }
+    Ok(out)
 }
 
 /// Move and/or rotate a footprint. Pads move with it (they're stored relative to it); pad and text angles in
@@ -295,25 +413,24 @@ fn plan_fp_move(
     let at = node.child("at").ok_or_else(|| anyhow!("footprint has no position"))?;
     let delta = angle - old.2;
     let mut edits = vec![Edit { start: at.span().start, end: at.span().end, text: at_with_angle(&sexpr::parse(&format!("(at {} {})", mm(x), mm(y)))?, angle) }];
+    let fp = board.footprints.iter().find(|f| f.id == item);
     let mut moves = Vec::new();
+    let mut pad_index = 0;
     for child in node.items().iter().skip(1).filter(|c| matches!(c.head(), Some("pad" | "property" | "fp_text"))) {
         let Some(cat) = child.child("at") else { continue };
         if delta.abs() > 1e-9 {
             edits.push(Edit { start: cat.span().start, end: cat.span().end, text: at_with_angle(cat, cat.num(3).unwrap_or(0.0) + delta) });
         }
         if child.head() == Some("pad") {
-            let local = cat.xy();
-            let place = |(fx, fy, fa): (f64, f64, f64)| {
-                let (rx, ry) = rotate(local.0, local.1, fa);
-                (fx + rx, fy + ry)
-            };
-            moves.push((place(old), place((x, y, angle)), net_name(child, nets)));
+            let pad = fp.and_then(|f| f.pads.get(pad_index));
+            pad_index += 1;
+            let Some(pad) = pad else { continue };
+            moves.push(PadMove { pad: pad.clone(), old_fp: old, new_fp: (x, y, angle) });
         }
     }
-    let follow = follow_edits(root, nets, &moves);
+    let follow = follow_pad_edits(root, nets, &moves)?;
     let n = follow.len();
     edits.extend(follow);
-    let fp = board.footprints.iter().find(|f| f.id == item);
     let reference = fp.map(|f| f.reference.as_str()).unwrap_or("footprint");
     let moved = (x - old.0).abs() > 1e-9 || (y - old.1).abs() > 1e-9;
     let title = match (moved, delta.abs() > 1e-9) {

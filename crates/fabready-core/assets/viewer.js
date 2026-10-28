@@ -303,7 +303,7 @@
       if (fpBoxes) return fpBoxes;
       fpBoxes = new Map();
       svg.querySelectorAll('[data-item^="fp:"]:not(text)').forEach((n) => {
-        if (n.closest(".pcbv-ui-layer")) return;
+        if (n.closest(".pcbv-ui-layer") || !shown(n)) return;
         const bb = n.getBBox();
         if (!bb.width && !bb.height) return;
         const b = fpBoxes.get(n.dataset.item) || [Infinity, Infinity, -Infinity, -Infinity];
@@ -346,9 +346,11 @@
       svg.querySelectorAll("#layers g.copper [data-net]:is(circle,polygon), #layer-T [data-net]:is(circle,polygon)").forEach((n) => {
         if (n.classList.contains("zone") || n.closest(".pcbv-ui-layer") || !shown(n)) return;
         const l = layerOf(n);
+        const layers = n.classList.contains("via") ? (n.dataset.layers || "").split(/\s+/).filter(Boolean) : null;
         if (layer && l !== "*" && l !== layer) return;
+        if (layer && layers && !layers.includes(layer)) return;
         const [x, y] = padCentre(n);
-        out.push({ x, y, net: n.dataset.net, kind: n.classList.contains("via") ? "via" : "pad", layer: l });
+        out.push({ x, y, net: n.dataset.net, kind: n.classList.contains("via") ? "via" : "pad", layer: l, layers });
       });
       svg.querySelectorAll('polyline[data-item^="track:"]').forEach((t) => {
         if (t.closest(".pcbv-ui-layer") || !shown(t)) return;
@@ -377,7 +379,7 @@
       }
       // From the bottom, back layers are drawn last (on top) and the image is mirrored.
       const stack = svg.querySelector("#layers");
-      if (stack && stack.dataset.order !== side) {
+      if (stack && (stack.dataset.order || "top") !== side) {
         stack.append(...[...stack.children].reverse());
         stack.dataset.order = side;
       }

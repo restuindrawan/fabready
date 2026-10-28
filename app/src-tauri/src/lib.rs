@@ -31,11 +31,23 @@ struct ViewerAssets {
 struct CheckPayload {
     report: Value,
     svg: String,
+    token: String,
 }
 
 fn run_check(path: &Path) -> Result<CheckPayload, String> {
-    let result = report::run(path, &Options::default()).map_err(|e| format!("{e:#}"))?;
-    Ok(CheckPayload { report: serde_json::to_value(&result.report).map_err(|e| e.to_string())?, svg: result.svg })
+    let (pcb, _) = report::resolve(path).map_err(|e| format!("{e:#}"))?;
+    for _ in 0..3 {
+        let source = std::fs::read_to_string(&pcb).map_err(|e| format!("reading {}: {e}", pcb.display()))?;
+        let result = report::run(&pcb, &Options::default()).map_err(|e| format!("{e:#}"))?;
+        if source == std::fs::read_to_string(&pcb).map_err(|e| format!("reading {}: {e}", pcb.display()))? {
+            return Ok(CheckPayload {
+                report: serde_json::to_value(&result.report).map_err(|e| e.to_string())?,
+                svg: result.svg,
+                token: fabready_core::fixes::token(&source),
+            });
+        }
+    }
+    Err("the board changed while it was being checked; check it again".into())
 }
 
 #[tauri::command]
