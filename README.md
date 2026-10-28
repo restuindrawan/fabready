@@ -6,7 +6,7 @@ Rust engine.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/app-dark.png">
-  <img alt="The fabready desktop app showing a keyboard PCB with numbered problem markers on the board and a list of findings beside it" src="docs/images/app-light.png">
+  <img alt="The fabready desktop app: a keyboard PCB with numbered problem markers and the editing toolbar, beside an agent chat that has just fixed an unrouted net" src="docs/images/app-light.png">
 </picture>
 
 ## What it checks
