@@ -157,6 +157,8 @@ impl Pad {
 
 #[derive(Debug, Clone)]
 pub struct Footprint {
+    /// `uuid` (or `tstamp`) from the file, or `#<n>` (order in the file) when there is none.
+    pub id: String,
     pub reference: String,
     pub value: String,
     pub lib_id: String,
@@ -192,6 +194,8 @@ impl Footprint {
 
 #[derive(Debug, Clone)]
 pub struct Track {
+    /// See `Footprint::id`; the order counts segments first, then arcs.
+    pub id: String,
     pub points: Vec<Point>,
     pub width: f64,
     pub layer: String,
@@ -202,10 +206,15 @@ impl Track {
     pub fn segments(&self) -> impl Iterator<Item = (Point, Point)> + '_ {
         self.points.windows(2).map(|w| (w[0], w[1]))
     }
+
+    pub fn length(&self) -> f64 {
+        self.segments().map(|(a, b)| (b.0 - a.0).hypot(b.1 - a.1)).sum()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Via {
+    pub id: String,
     pub x: f64,
     pub y: f64,
     pub size: f64,
@@ -219,18 +228,64 @@ pub struct Zone {
     pub layers: Vec<String>,
     pub keepout: bool,
     pub outline: Vec<Point>,
+    /// Copper KiCad poured when the zones were last filled: (layer, polygon).
+    pub fills: Vec<(String, Vec<Point>)>,
+}
+
+/// One entry of the board's `(layers ...)` table.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LayerInfo {
+    pub name: String,
+    /// signal | power | mixed | jumper | user
+    pub kind: String,
+    /// The name the user gave it in KiCad, if any.
+    pub user_name: String,
+}
+
+/// A line, rectangle, circle, arc or polygon on any layer (silkscreen, fab, courtyard, copper…).
+#[derive(Debug, Clone)]
+pub struct Graphic {
+    pub layer: String,
+    pub points: Vec<Point>,
+    pub closed: bool,
+    pub width: f64,
+    pub filled: bool,
+    /// Footprint reference for footprint graphics, empty for board graphics.
+    pub owner: String,
+}
+
+/// Visible text (silkscreen references, fab values, board text).
+#[derive(Debug, Clone)]
+pub struct Text {
+    pub layer: String,
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    /// Degrees, counter-clockwise as in KiCad.
+    pub angle: f64,
+    /// Character height in mm.
+    pub size: f64,
+    pub mirrored: bool,
+    /// left | right | "" (centred)
+    pub justify: String,
+    pub owner: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct Board {
     pub path: PathBuf,
     pub version: String,
+    /// The board's layer table, in file order.
+    pub layers: Vec<LayerInfo>,
     pub footprints: Vec<Footprint>,
     pub tracks: Vec<Track>,
     pub vias: Vec<Via>,
     pub zones: Vec<Zone>,
     /// Edge.Cuts polylines and whether each one is a closed shape by itself.
     pub edges: Vec<(Vec<Point>, bool)>,
+    /// Every other graphic, from the board and its footprints.
+    pub graphics: Vec<Graphic>,
+    pub texts: Vec<Text>,
 }
 
 pub fn bbox_of(pts: &[Point]) -> Option<(f64, f64, f64, f64)> {
@@ -323,6 +378,55 @@ pub fn layer_of(node: &Sexp) -> String {
     node.value("layer").unwrap_or_default().to_string()
 }
 
+/// A node's `uuid` (KiCad 7+) or `tstamp` (older), or `#<ordinal>` when it has neither.
+pub fn item_id(node: &Sexp, ordinal: usize) -> String {
+    node.value("uuid").or_else(|| node.value("tstamp")).map(str::to_string).unwrap_or_else(|| format!("#{ordinal}"))
+}
+
+fn stroke_width(node: &Sexp) -> f64 {
+    node.child("stroke").and_then(|s| s.value_f64("width")).or_else(|| node.value_f64("width")).unwrap_or(0.12)
+}
+
+fn is_filled(node: &Sexp) -> bool {
+    node.child("fill").and_then(|f| f.arg(1)).is_some_and(|v| v == "solid" || v == "yes")
+}
+
+/// Hidden text: `(hide yes)` (KiCad 8+) or a bare `hide` flag on the node or its effects (older files).
+fn is_hidden(node: &Sexp) -> bool {
+    let flagged = |n: &Sexp| n.items().iter().any(|i| i.atom() == Some("hide")) || n.value("hide") == Some("yes");
+    flagged(node) || node.child("effects").is_some_and(flagged)
+}
+
+/// Visible text from `property`, `fp_text` or `gr_text`, placed on the board.
+fn text_of(node: &Sexp, transform: &dyn Fn(Point) -> Point, owner: &str, value: &str) -> Option<Text> {
+    let raw = match node.head()? {
+        "property" | "fp_text" => node.arg(2)?,
+        "gr_text" => node.arg(1)?,
+        _ => return None,
+    };
+    let layer = layer_of(node);
+    if raw.is_empty() || layer.is_empty() || is_hidden(node) {
+        return None;
+    }
+    let at = node.child("at");
+    let (x, y) = transform(at.map(Sexp::xy).unwrap_or((0.0, 0.0)));
+    let effects = node.child("effects");
+    let justify = effects.and_then(|e| e.child("justify"));
+    let has = |flag: &str| justify.is_some_and(|j| j.items().iter().any(|i| i.atom() == Some(flag)));
+    let text = raw.replace("${REFERENCE}", owner).replace("%R", owner).replace("${VALUE}", value).replace("%V", value);
+    Some(Text {
+        layer,
+        text,
+        x,
+        y,
+        angle: at.and_then(|a| a.num(3)).unwrap_or(0.0),
+        size: effects.and_then(|e| e.child("font")).and_then(|f| f.child("size")).and_then(|s| s.num(1)).unwrap_or(1.0),
+        mirrored: has("mirror"),
+        justify: if has("left") { "left".into() } else if has("right") { "right".into() } else { String::new() },
+        owner: owner.to_string(),
+    })
+}
+
 /// Points (board coordinates) and closedness of a gr_*/fp_* graphic.
 fn shape_points(node: &Sexp, transform: &dyn Fn(Point) -> Point) -> (Vec<Point>, bool) {
     let head = node.head().unwrap_or_default();
@@ -375,8 +479,26 @@ pub fn parse_board(text: &str) -> Result<Board> {
 
     let mut footprints = Vec::new();
     let mut edges = Vec::new();
+    let mut graphics = Vec::new();
+    let mut texts = Vec::new();
 
-    for node in root.children("footprint").chain(root.children("module")) {
+    let layers = root
+        .child("layers")
+        .map(|l| {
+            l.items()[1..]
+                .iter()
+                .filter_map(|e| {
+                    Some(LayerInfo {
+                        name: e.arg(1)?.to_string(),
+                        kind: e.arg(2).unwrap_or("user").to_string(),
+                        user_name: e.arg(3).unwrap_or_default().to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (ordinal, node) in root.children("footprint").chain(root.children("module")).enumerate() {
         let at = node.child("at");
         let (fx, fy) = at.map(Sexp::xy).unwrap_or((0.0, 0.0));
         let fangle = at.and_then(|a| a.num(3)).unwrap_or(0.0);
@@ -411,6 +533,7 @@ pub fn parse_board(text: &str) -> Result<Board> {
         };
 
         let mut fp = Footprint {
+            id: item_id(node, ordinal),
             reference: reference.clone(),
             value,
             lib_id: node.arg(1).unwrap_or_default().to_string(),
@@ -456,7 +579,11 @@ pub fn parse_board(text: &str) -> Result<Board> {
 
         for g in node.items().iter().skip(1) {
             let Some(head) = g.head() else { continue };
-            if !head.starts_with("fp_") || head == "fp_text" {
+            if head == "fp_text" || head == "property" {
+                texts.extend(text_of(g, &transform, &fp.reference, &fp.value));
+                continue;
+            }
+            if !head.starts_with("fp_") {
                 continue;
             }
             let layer = layer_of(g);
@@ -464,35 +591,51 @@ pub fn parse_board(text: &str) -> Result<Board> {
             if pts.is_empty() {
                 continue;
             }
-            if layer.ends_with("CrtYd") {
-                fp.courtyard.push(pts);
-            } else if layer == "Edge.Cuts" {
+            if layer == "Edge.Cuts" {
                 edges.push((pts, closed));
+                continue;
             }
+            if layer.ends_with("CrtYd") {
+                fp.courtyard.push(pts.clone());
+            }
+            graphics.push(Graphic { layer, points: pts, closed, width: stroke_width(g), filled: is_filled(g), owner: fp.reference.clone() });
         }
         footprints.push(fp);
     }
 
     for g in root.items().iter().skip(1) {
-        if g.head().is_some_and(|h| h.starts_with("gr_")) && layer_of(g) == "Edge.Cuts" {
-            let (pts, closed) = shape_points(g, &|p| p);
-            if !pts.is_empty() {
-                edges.push((pts, closed));
-            }
+        let Some(head) = g.head() else { continue };
+        if head == "gr_text" {
+            texts.extend(text_of(g, &|p| p, "", ""));
+            continue;
+        }
+        if !head.starts_with("gr_") {
+            continue;
+        }
+        let (pts, closed) = shape_points(g, &|p| p);
+        if pts.is_empty() {
+            continue;
+        }
+        match layer_of(g) {
+            l if l == "Edge.Cuts" => edges.push((pts, closed)),
+            layer => graphics.push(Graphic { layer, points: pts, closed, width: stroke_width(g), filled: is_filled(g), owner: String::new() }),
         }
     }
 
     let mut tracks = Vec::new();
-    for seg in root.children("segment") {
+    for (ordinal, seg) in root.children("segment").enumerate() {
         tracks.push(Track {
+            id: item_id(seg, ordinal),
             points: vec![seg.child_xy("start"), seg.child_xy("end")],
             width: seg.value_f64("width").unwrap_or(0.25),
             layer: layer_of(seg),
             net: net_name(seg, &nets),
         });
     }
-    for arc in root.children("arc") {
+    let segments = tracks.len();
+    for (ordinal, arc) in root.children("arc").enumerate() {
         tracks.push(Track {
+            id: item_id(arc, segments + ordinal),
             points: arc_points(arc.child_xy("start"), arc.child_xy("mid"), arc.child_xy("end"), 8),
             width: arc.value_f64("width").unwrap_or(0.25),
             layer: layer_of(arc),
@@ -502,9 +645,11 @@ pub fn parse_board(text: &str) -> Result<Board> {
 
     let vias = root
         .children("via")
-        .map(|v| {
+        .enumerate()
+        .map(|(ordinal, v)| {
             let (x, y) = v.child_xy("at");
             Via {
+                id: item_id(v, ordinal),
                 x,
                 y,
                 size: v.value_f64("size").unwrap_or(0.6),
@@ -526,17 +671,25 @@ pub fn parse_board(text: &str) -> Result<Board> {
                 .and_then(|p| p.child("pts"))
                 .map(|pts| pts.children("xy").map(Sexp::xy).collect())
                 .unwrap_or_default();
-            Zone { net: net_name(z, &nets), layers, keepout: z.child("keepout").is_some(), outline }
+            let fills = z
+                .children("filled_polygon")
+                .filter_map(|f| Some((layer_of(f), f.child("pts")?.children("xy").map(Sexp::xy).collect::<Vec<_>>())))
+                .filter(|(_, pts)| pts.len() >= 3)
+                .collect();
+            Zone { net: net_name(z, &nets), layers, keepout: z.child("keepout").is_some(), outline, fills }
         })
         .collect();
 
     Ok(Board {
         path: PathBuf::new(),
         version: root.value("version").unwrap_or_default().to_string(),
+        layers,
         footprints,
         tracks,
         vias,
         zones,
         edges,
+        graphics,
+        texts,
     })
 }

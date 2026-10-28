@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+mod agent;
+mod bridge;
 
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult, Debouncer};
 use fabready_core::config::{self, Config, Rules};
@@ -9,7 +12,7 @@ use fabready_core::report::{self, default_out_dir, Options};
 use fabready_core::render::{VIEWER_CSS, VIEWER_JS};
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 type Watcher = Debouncer<notify_debouncer_mini::notify::RecommendedWatcher>;
 
@@ -209,9 +212,55 @@ fn save_config(path: String, config: Config) -> Result<String, String> {
     Ok(file.display().to_string())
 }
 
+#[derive(Serialize)]
+struct ItemsView {
+    /// One entry per item asked for, in order (null for items no longer on the board).
+    items: Vec<Value>,
+    /// Hash of the board file, so an edit from the card is refused if the file changed since.
+    token: String,
+}
+
+/// Board items (`track:<id>`, `via:<id>`, `fp:<id>`) as the properties card shows them.
 #[tauri::command]
-fn restore_backup(path: String, backup: String) -> Result<(), String> {
-    fabready_core::fixes::restore(Path::new(&path), Path::new(&backup)).map_err(|e| format!("{e:#}"))
+async fn inspect_items(path: String, items: Vec<String>) -> Result<ItemsView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (pcb, _) = report::resolve(Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+        let text = std::fs::read_to_string(&pcb).map_err(|e| e.to_string())?;
+        let board = fabready_core::board::parse_board(&text).map_err(|e| format!("{e:#}"))?;
+        let items = items.iter().map(|i| fabready_core::edit::inspect(&board, i).unwrap_or(Value::Null)).collect();
+        Ok(ItemsView { items, token: fabready_core::fixes::token(&text) })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Write edits (`edit:`, `delete:`, `add:` ids) with a backup. With `token`, refuses if the file changed since.
+#[tauri::command]
+async fn apply_edits(path: String, edits: Vec<String>, token: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let opts = Options { use_kicad: false, ..Default::default() };
+        let applied = fabready_core::fixes::apply(Path::new(&path), &opts, &edits, token.as_deref()).map_err(|e| format!("{e:#}"))?;
+        serde_json::to_value(applied).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Undo or redo: put `backup` in place, keeping the current board as a new backup (returned with its token).
+#[tauri::command]
+async fn swap_backup(path: String, backup: String, token: String) -> Result<fabready_core::fixes::Swapped, String> {
+    tauri::async_runtime::spawn_blocking(move || fabready_core::fixes::swap(Path::new(&path), Path::new(&backup), &token).map_err(|e| format!("{e:#}")))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The window's answer to an `app-request` from an agent's app tool.
+#[tauri::command]
+fn app_reply(bridge: State<'_, Arc<bridge::Bridge>>, id: u64, result: Option<Value>, error: Option<String>) {
+    bridge.reply(id, match error {
+        Some(e) => Err(e),
+        None => Ok(result.unwrap_or(Value::Null)),
+    });
 }
 
 /// Last agent that connected over MCP (name + unix time), if any.
@@ -232,6 +281,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .manage(agent::Agents::default())
+        .setup(|app| {
+            app.manage(bridge::start(app.handle().clone())?);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             viewer_assets,
             check_path,
@@ -242,11 +296,28 @@ pub fn run() {
             initial_path,
             preview_fixes,
             apply_fixes,
-            restore_backup,
+            inspect_items,
+            apply_edits,
+            swap_backup,
             load_config,
             save_config,
-            agent_status
+            agent_status,
+            app_reply,
+            agent::agent_list,
+            agent::agent_session,
+            agent::agent_authenticate,
+            agent::agent_prompt,
+            agent::agent_cancel,
+            agent::agent_permission,
+            agent::agent_set_config,
+            agent::agent_set_mode,
+            agent::agent_stop
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running fabready");
+        .build(tauri::generate_context!())
+        .expect("error while running fabready")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<agent::Agents>().stop_all();
+            }
+        });
 }

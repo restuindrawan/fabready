@@ -54,6 +54,136 @@ fn svg_has_layers_and_markers() {
     }
     // Two via findings share one marker.
     assert!(result.svg.contains(r#"data-idx="2 3""#));
+    // Every layer is its own group: silkscreen shows by default, fabrication is off until turned on.
+    assert!(result.svg.contains(r#"data-layer="F.SilkS""#));
+    assert!(result.svg.contains(r##"data-layer="F.Fab" data-label="Front fabrication" color="#a7a7b0" display="none""##));
+    assert!(result.svg.contains(">SW1</text>"));
+    // Board items can be picked in the app.
+    assert!(result.svg.contains(r#"data-item="track:"#) && result.svg.contains(r#"data-item="via:"#) && result.svg.contains(r#"data-item="fp:"#));
+}
+
+#[test]
+fn manual_edits_are_surgical_and_undoable() {
+    use fabready_core::{board, edit, fixes};
+    let dir = std::env::temp_dir().join(format!("fabready-edit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pcb = dir.join("b.kicad_pcb");
+    std::fs::copy(sample("macropad-buggy/macropad-buggy.kicad_pcb"), &pcb).unwrap();
+    let original = std::fs::read_to_string(&pcb).unwrap();
+    let opts = Options { use_kicad: false, ..Default::default() };
+    let b = board::load(&pcb).unwrap();
+    let track = b.tracks.iter().find(|t| t.layer == "B.Cu" && t.width == 0.25).unwrap().clone();
+    let via = b.vias[0].clone();
+    let sw5 = b.footprint("SW5").unwrap().clone();
+
+    let info = edit::inspect(&b, &format!("track:{}", track.id)).unwrap();
+    assert_eq!(info["width"], 0.25);
+    assert_eq!(info["copper_layers"], serde_json::json!(["F.Cu", "B.Cu"]));
+    assert_eq!(edit::inspect(&b, &format!("fp:{}", sw5.id)).unwrap()["reference"], "SW5");
+
+    let ids = |v: &[String]| v.to_vec();
+    let edits = ids(&[
+        format!("edit:track:{}:width=0.3", track.id),
+        format!("edit:via:{}:size=0.8", via.id),
+        format!("edit:via:{}:drill=0.4", via.id),
+        format!("edit:fp:{}:at={},{},90", sw5.id, sw5.x + 1.0, sw5.y),
+        format!("edit:fp:{}:reference=SW15", sw5.id),
+    ]);
+    let preview = fixes::preview(&dir, &opts, &edits).unwrap();
+    assert_eq!(std::fs::read_to_string(&pcb).unwrap(), original, "preview must not write");
+    assert_eq!(preview.changes[0].title, "Track width 0.25 → 0.3 mm");
+    let applied = fixes::apply(&dir, &opts, &edits, Some(&preview.token)).unwrap();
+
+    let text = std::fs::read_to_string(&pcb).unwrap();
+    assert_eq!(text.lines().count(), original.lines().count(), "edits change values in place");
+    let after = board::load(&pcb).unwrap();
+    assert_eq!(after.tracks.iter().find(|t| t.id == track.id).unwrap().width, 0.3);
+    let v = after.vias.iter().find(|v| v.id == via.id).unwrap();
+    assert_eq!((v.size, v.drill), (0.8, 0.4));
+    let moved = after.footprint("SW15").expect("renamed");
+    assert_eq!((moved.x, moved.angle), (sw5.x + 1.0, 90.0));
+    // Pad angles in the file include the footprint's rotation, so they turned with it.
+    assert!(moved.pads.iter().all(|p| p.angle == 90.0));
+    let (p0, q0) = (&sw5.pads[0], &moved.pads[0]);
+    assert!(((q0.x - moved.x) - (p0.y - sw5.y)).abs() < 1e-6 && ((q0.y - moved.y) + (p0.x - sw5.x)).abs() < 1e-6, "pads rotate about the footprint");
+
+    // Deleting a track removes its line and nothing else.
+    let del = ids(&[format!("delete:track:{}", track.id)]);
+    fixes::apply(&dir, &opts, &del, None).unwrap();
+    assert_eq!(std::fs::read_to_string(&pcb).unwrap().lines().count(), original.lines().count() - 1);
+
+    // Bad values are refused before anything is written.
+    for bad in [
+        format!("edit:via:{}:drill=0.9", via.id),
+        format!("edit:track:{}:layer=F.SilkS", b.tracks[1].id),
+        format!("edit:fp:{}:reference=SW1", after.footprint("SW15").unwrap().id),
+        format!("edit:track:{}:width=0", b.tracks[1].id),
+        "edit:track:nope:width=0.3".to_string(),
+    ] {
+        assert!(fixes::preview(&dir, &opts, &ids(std::slice::from_ref(&bad))).is_err(), "{bad}");
+    }
+
+    fixes::restore(&dir, std::path::Path::new(&applied.backup)).unwrap();
+    assert_eq!(std::fs::read_to_string(&pcb).unwrap(), original);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn drag_route_and_undo_redo() {
+    use fabready_core::{board, fixes};
+    let dir = std::env::temp_dir().join(format!("fabready-drag-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pcb = dir.join("b.kicad_pcb");
+    std::fs::copy(sample("macropad/macropad.kicad_pcb"), &pcb).unwrap();
+    let original = std::fs::read_to_string(&pcb).unwrap();
+    let opts = Options { use_kicad: false, ..Default::default() };
+    let b = board::load(&pcb).unwrap();
+    let sw1 = b.footprint("SW1").unwrap().clone();
+    let close = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3;
+    let ends_at = |b: &board::Board, p: (f64, f64), net: &str| b.tracks.iter().filter(|t| t.net == net && t.points.iter().any(|q| close(*q, p))).count();
+    let pad = sw1.pads.iter().find(|p| !p.net.is_empty() && ends_at(&b, (p.x, p.y), &p.net) > 0).expect("a routed pad").clone();
+    let connected = ends_at(&b, (pad.x, pad.y), &pad.net);
+
+    // Dragging a footprint drags the track ends on its pads along (up its column, so nothing else moves off a track).
+    let drag = vec![format!("edit:fp:{}:move=0,-0.5", sw1.id)];
+    let done = fixes::apply(&dir, &opts, &drag, None).unwrap();
+    assert!(done.changes[0].detail.contains("follow"), "{}", done.changes[0].detail);
+    let after = board::load(&pcb).unwrap();
+    let moved = after.footprint("SW1").unwrap();
+    assert_eq!((moved.x, moved.y), (sw1.x, sw1.y - 0.5));
+    assert_eq!(ends_at(&after, (pad.x, pad.y - 0.5), &pad.net), connected);
+    let errs: Vec<String> = report::run(&dir, &opts).unwrap().report.findings.iter().filter(|f| f.severity == Severity::Error).map(|f| f.message.clone()).collect();
+    assert!(errs.is_empty(), "stretched tracks stay connected: {errs:?}");
+
+    // Undo puts the board back and keeps the undone state for redo; a stale token is refused.
+    assert!(fixes::swap(&dir, std::path::Path::new(&done.backup), "0000").is_err());
+    let undone = fixes::swap(&dir, std::path::Path::new(&done.backup), &done.token).unwrap();
+    assert_eq!(std::fs::read_to_string(&pcb).unwrap(), original);
+    let redone = fixes::swap(&dir, std::path::Path::new(&undone.backup), &undone.token).unwrap();
+    assert_eq!(fixes::token(&std::fs::read_to_string(&pcb).unwrap()), done.token);
+    fixes::swap(&dir, std::path::Path::new(&redone.backup), &redone.token).unwrap();
+
+    // Rotating turns the footprint relative to where it is.
+    fixes::apply(&dir, &opts, &[format!("edit:fp:{}:rotate=90", sw1.id)], None).unwrap();
+    assert_eq!(board::load(&pcb).unwrap().footprint("SW1").unwrap().angle, 90.0);
+    std::fs::write(&pcb, &original).unwrap();
+
+    // Route a new track with a bend and drop a via on its end; both join the net.
+    let net = pad.net.clone();
+    let (x, y) = (pad.x, pad.y);
+    let add = vec![
+        format!("add:track:F.Cu:0.3:{x},{y};{},{y};{},{}:{net}", x + 3.0, x + 5.0, y + 2.0),
+        format!("add:via:{},{}:0.6:0.3:{net}", x + 5.0, y + 2.0),
+    ];
+    let done = fixes::apply(&dir, &opts, &add, None).unwrap();
+    assert_eq!(done.changes[0].title, format!("Route {net}"));
+    let after = board::load(&pcb).unwrap();
+    assert_eq!(after.tracks.len(), b.tracks.len() + 2);
+    assert!(after.tracks.iter().filter(|t| t.layer == "F.Cu" && t.width == 0.3).all(|t| t.net == net));
+    assert!(after.vias.iter().any(|v| close((v.x, v.y), (x + 5.0, y + 2.0)) && v.net == net));
+    assert!(fixes::preview(&dir, &opts, &["add:track:F.Cu:0.3:1,1;2,2:NO_SUCH_NET".to_string()]).is_err());
+    assert!(fixes::preview(&dir, &opts, &["add:via:1,1:0.3:0.6:".to_string()]).is_err());
+    std::fs::remove_dir_all(dir).ok();
 }
 
 #[test]

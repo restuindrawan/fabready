@@ -8,6 +8,7 @@
   --accent:#3ecf8e;--accent-strong:#36c083;--on-accent:#04241a;
   --error:#f2555a;--warning:#f5a524;--info:#4c9aff;--ok:#3ecf8e;
   --canvas:#0e0f11;--c-board:#10281b;--c-edge:#d9c84a;--c-f:#e05a54;--c-b:#5592e6;--c-pad:#c9a640;--c-via:#b5b5b5;--c-crt:#5f6573;--c-ref:#e6e8ee;
+  --c-silk-f:#e8e4b8;--c-silk-b:#c99bd6;
   --shadow:0 10px 30px rgba(0,0,0,.5);--radius:8px;
 }
 @media (prefers-color-scheme:light){:root{
@@ -16,6 +17,7 @@
   --accent:#10a36b;--accent-strong:#0c8f5d;--on-accent:#ffffff;
   --error:#d93a40;--warning:#c27800;--info:#2f6fe0;--ok:#10a36b;
   --canvas:#f1f2f4;--c-board:#dfece3;--c-edge:#a8900c;--c-f:#cf4640;--c-b:#2f6fd0;--c-pad:#b08620;--c-via:#8c919b;--c-crt:#a7adb8;--c-ref:#2a2f3a;
+  --c-silk-f:#3f3f46;--c-silk-b:#8b4fa3;
   --shadow:0 10px 30px rgba(0,0,0,.12);
 }}
 
@@ -25,12 +27,30 @@
 .pcbv-svg,.pcbv-svg svg{width:100%;height:100%;display:block}
 .pcbv-svg svg .bg,.pcbv-svg svg .hole{fill:var(--canvas)}
 .pcbv-svg svg .board-fill{fill:var(--c-board)}
-.pcbv-svg svg .edge{stroke:var(--c-edge)}
-.pcbv-svg svg .trk-f{stroke:var(--c-f)}.pcbv-svg svg .trk-b{stroke:var(--c-b)}
-.pcbv-svg svg .pad-f,.pcbv-svg svg .zone-f{fill:var(--c-f)}.pcbv-svg svg .pad-b,.pcbv-svg svg .zone-b{fill:var(--c-b)}
-.pcbv-svg svg .zone-f{stroke:var(--c-f)}.pcbv-svg svg .zone-b{stroke:var(--c-b)}
+/* Layer colours: each layer group sets `color`, and its shapes draw in currentColor. */
+.pcbv-svg svg g[data-layer="F.Cu"]{color:var(--c-f)}.pcbv-svg svg g[data-layer="B.Cu"]{color:var(--c-b)}
+.pcbv-svg svg g[data-layer="F.SilkS"]{color:var(--c-silk-f)}.pcbv-svg svg g[data-layer="B.SilkS"]{color:var(--c-silk-b)}
+.pcbv-svg svg g[data-layer$=".CrtYd"]{color:var(--c-crt)}.pcbv-svg svg g[data-layer="Edge.Cuts"]{color:var(--c-edge)}
+.pcbv-svg svg g[data-layer$=".Mask"],.pcbv-svg svg g[data-layer$=".Paste"]{opacity:.55}
 .pcbv-svg svg .pad{fill:var(--c-pad)}.pcbv-svg svg .via{fill:var(--c-via)}
-.pcbv-svg svg .crt{stroke:var(--c-crt)}.pcbv-svg svg text.ref{fill:var(--c-ref)}
+.pcbv-svg svg text.ref{fill:var(--c-ref)}
+.pcbv-svg svg.pcbv-no-zones .zone{display:none}
+.pcbv-svg svg.pl-focusing g[data-layer]:not(.pl-focus),.pcbv-svg svg.pl-focusing #layer-T{opacity:.12}
+.pcbv-svg svg g[data-layer]{transition:opacity .12s}
+/* Bottom view: mirror the board, but keep app labels and marker numbers readable. */
+.pcbv-svg.flipped svg{transform:scaleX(-1)}
+.pcbv-svg.flipped svg text.ref,.pcbv-svg.flipped svg .marker text,.pcbv-svg.flipped svg .pcbv-ui-layer text{transform-box:fill-box;transform-origin:center;transform:scaleX(-1)}
+/* Picked board items, drag previews and the app's tool drawings. */
+.pcbv-svg svg .pcbv-ui-layer{pointer-events:none}
+.pcbv-svg svg .ghosted{opacity:.22}
+.pcbv-svg svg .marquee{fill:var(--accent);fill-opacity:.08;stroke:var(--accent)}
+.pcbv-canvas[data-mode="select"]{cursor:default}
+.pcbv-canvas[data-mode="tool"]{cursor:crosshair}
+.pcbv-canvas[data-mode="hand"],.pcbv-canvas.space{cursor:grab}
+.pcbv-canvas.dragging{cursor:grabbing}
+.pcbv-svg svg .sel-halo{fill:none;stroke:var(--accent);stroke-opacity:.55;stroke-linecap:round;stroke-linejoin:round}
+.pcbv-svg svg .sel-ring{fill:none;stroke:var(--accent);stroke-width:.25}
+.pcbv-svg svg .sel-box{fill:var(--accent);fill-opacity:.07;stroke:var(--accent);stroke-width:.2;stroke-dasharray:.8 .5}
 .pcbv-svg svg [data-net].hl{filter:brightness(1.45) saturate(1.2)}
 .pcbv-svg svg text.ref.hl{fill:var(--warning);opacity:1;font-weight:700}
 .pcbv-svg svg .marker{cursor:pointer}
@@ -39,7 +59,27 @@
 
 .pcbv-overlay{position:absolute;display:flex;gap:2px;padding:3px;border-radius:10px;background:color-mix(in srgb,var(--raised) 88%,transparent);
   border:1px solid var(--line);box-shadow:var(--shadow);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);font:12px/1 var(--font);color:var(--text);cursor:default}
-.pcbv-layers{left:12px;bottom:12px}
+.pcbv-layers{left:12px;bottom:12px;flex-direction:column;align-items:stretch;gap:0;max-height:calc(100% - 24px);min-width:0}
+.pl-head{display:flex;align-items:center;gap:2px}
+.pl-toggle svg{opacity:.85}
+.pl-count{color:var(--faint);font-variant-numeric:tabular-nums}
+.pl-side{display:flex;gap:2px}
+.pcbv-overlay .pl-side button[aria-pressed="true"]{background:var(--active);color:var(--text)}
+.pl-body{width:240px;max-height:min(520px,calc(100vh - 160px));overflow:auto;padding:4px 2px 6px;margin-bottom:4px;border-bottom:1px solid var(--line);scrollbar-width:thin}
+.pl-sec{padding:8px 8px 3px;font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.pl-row{display:flex;align-items:center;border-radius:7px}
+.pl-row:hover{background:var(--hover)}
+.pcbv-overlay .pl-vis{flex:1;min-width:0;padding:5px 8px}
+.pcbv-overlay .pl-vis:hover{background:none}
+.pl-vis .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.pl-vis .k{font:11px var(--mono);color:var(--faint)}
+.pl-row.off .nm{color:var(--faint)}
+.pl-row.off .sw{opacity:.2}
+.pcbv-overlay .pl-only{padding:4px 7px;margin-right:2px;font-size:11px;color:var(--faint);visibility:hidden}
+.pl-row:hover .pl-only,.pl-only:focus-visible{visibility:visible}
+.pcbv-overlay .pl-only:hover{color:var(--text)}
+.pl-presets{display:flex;gap:2px;padding:8px 4px 0}
+.pcbv-overlay .pl-presets button{flex:1;justify-content:center;padding:5px 0;border:1px solid var(--line);font-size:11.5px}
 .pcbv-zoom{right:12px;bottom:12px}
 .pcbv-overlay button{all:unset;display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:7px;cursor:pointer;color:var(--dim);white-space:nowrap}
 .pcbv-overlay button:hover{background:var(--hover);color:var(--text)}

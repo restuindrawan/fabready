@@ -7,6 +7,8 @@
 //! - `widen-track:<layer>:<width>:<net>`: widen every track of that net/layer/width to a fab-safe width
 //! - `resize-via:<x>:<y>`: enlarge the via's drill and/or diameter to meet the fab's minimums
 //! - `antenna-keepout:<ref>`: add a "no copper pour" rule area over a wireless module
+//!
+//! Manual edits from the app (`edit:...`, `delete:...`, see `edit.rs`) go through the same plan, preview and apply.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
@@ -89,7 +91,7 @@ pub fn title(id: &str) -> String {
     }
 }
 
-fn mm(v: f64) -> String {
+pub(crate) fn mm(v: f64) -> String {
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
     if s.is_empty() || s == "-0" {
@@ -107,13 +109,13 @@ fn rule(rules: &Rules, key: &str) -> f64 {
     rules.get(key).copied().unwrap_or(0.0)
 }
 
-fn atom_edit(node: &Sexp, key: &str, text: String) -> Option<Edit> {
+pub(crate) fn atom_edit(node: &Sexp, key: &str, text: String) -> Option<Edit> {
     let atom = node.child(key)?.items().get(1)?;
     let span = atom.span();
     Some(Edit { start: span.start, end: span.end, text })
 }
 
-fn uuid_for(seed: &str) -> String {
+pub(crate) fn uuid_for(seed: &str) -> String {
     let mut h = DefaultHasher::new();
     seed.hash(&mut h);
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0).hash(&mut h);
@@ -126,6 +128,9 @@ fn uuid_for(seed: &str) -> String {
 
 /// Work out the edits for one fix id against the board source.
 pub fn plan(text: &str, root: &Sexp, board: &Board, rules: &Rules, id: &str) -> Result<Plan> {
+    if crate::edit::is_edit(id) {
+        return crate::edit::plan(text, root, board, id);
+    }
     let nets = board::net_table(root);
     let mut parts = id.splitn(4, ':');
     let kind = parts.next().unwrap_or_default();
@@ -362,6 +367,8 @@ pub fn preview(path: &Path, opts: &Options, ids: &[String]) -> Result<Preview> {
 pub struct Applied {
     pub board: String,
     pub backup: String,
+    /// Hash of the board as written, so undo can tell whether something else changed it since.
+    pub token: String,
     pub changes: Vec<Change>,
     pub before: Summary,
     pub after: Summary,
@@ -376,12 +383,7 @@ pub fn apply(path: &Path, opts: &Options, ids: &[String], expect_token: Option<&
             bail!("the board changed since the preview; preview again before applying");
         }
     }
-    let dir = report::default_out_dir(&p.pcb).join("backups");
-    std::fs::create_dir_all(&dir)?;
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-    let stem = p.pcb.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "board".into());
-    let backup = dir.join(format!("{stem}-{stamp}.kicad_pcb"));
-    std::fs::write(&backup, &p.original)?;
+    let backup = write_backup(&p.pcb, &p.original)?;
     std::fs::write(&p.pcb, &p.new_text)?;
 
     let mut board = board::parse_board(&p.new_text)?;
@@ -391,22 +393,63 @@ pub fn apply(path: &Path, opts: &Options, ids: &[String], expect_token: Option<&
     Ok(Applied {
         board: p.pcb.display().to_string(),
         backup: backup.display().to_string(),
+        token: token(&p.new_text),
         changes: p.plans.into_iter().map(|pl| pl.change).collect(),
         before: p.before,
         after,
     })
 }
 
-/// Undo: put a backup made by `apply` back in place.
-pub fn restore(path: &Path, backup: &Path) -> Result<()> {
-    let (pcb, _) = report::resolve(path)?;
-    let backups = report::default_out_dir(&pcb).join("backups");
+/// Save `text` (the board before a change) to `fabready-out/backups/`.
+fn write_backup(pcb: &Path, text: &str) -> Result<PathBuf> {
+    let dir = report::default_out_dir(pcb).join("backups");
+    std::fs::create_dir_all(&dir)?;
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let stem = pcb.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "board".into());
+    // Several edits can land in the same millisecond; the content hash keeps their backups apart.
+    let backup = dir.join(format!("{stem}-{stamp}-{}.kicad_pcb", &token(text)[..8]));
+    std::fs::write(&backup, text)?;
+    Ok(backup)
+}
+
+/// Read a backup, refusing anything outside `fabready-out/backups/` or that isn't a board.
+fn read_backup(pcb: &Path, backup: &Path) -> Result<String> {
+    let backups = report::default_out_dir(pcb).join("backups");
     let backup = std::fs::canonicalize(backup).with_context(|| format!("backup {} not found", backup.display()))?;
     if !backup.starts_with(std::fs::canonicalize(&backups).unwrap_or(backups)) {
         bail!("refusing to restore from outside fabready-out/backups");
     }
     let text = std::fs::read_to_string(&backup)?;
     sexpr::parse(&text).context("backup is not a readable board")?;
+    Ok(text)
+}
+
+/// Undo: put a backup made by `apply` back in place.
+pub fn restore(path: &Path, backup: &Path) -> Result<()> {
+    let (pcb, _) = report::resolve(path)?;
+    let text = read_backup(&pcb, backup)?;
     std::fs::write(&pcb, text)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Swapped {
+    /// Backup of the board as it was just before the swap (to redo, or undo the undo).
+    pub backup: String,
+    /// Hash of the board as it is now.
+    pub token: String,
+}
+
+/// Undo/redo step: put `backup` in place and keep the current board as a new backup. Refuses when the
+/// board no longer matches `expect_token` (it was changed elsewhere since), so nobody's work is thrown away.
+pub fn swap(path: &Path, backup: &Path, expect_token: &str) -> Result<Swapped> {
+    let (pcb, _) = report::resolve(path)?;
+    let current = std::fs::read_to_string(&pcb).with_context(|| format!("reading {}", pcb.display()))?;
+    if token(&current) != expect_token {
+        bail!("the board changed since that edit (in KiCad or by an agent), so undoing it would lose those changes");
+    }
+    let text = read_backup(&pcb, backup)?;
+    let saved = write_backup(&pcb, &current)?;
+    std::fs::write(&pcb, &text)?;
+    Ok(Swapped { backup: saved.display().to_string(), token: token(&text) })
 }

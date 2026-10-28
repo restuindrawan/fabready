@@ -22,7 +22,102 @@ datasheet knowledge. Keyboard boards get extra matrix/diode/controller checks \
 automatically; call get_matrix only when the user is working on keyboard firmware (ZMK/QMK pins, diode direction). \
 Only edit the user's KiCad files when they've asked you to fix something.";
 
+const APP_INSTRUCTIONS: &str = " You are running inside the fabready desktop app, beside the user's board. The app \
+re-checks the board whenever a file is saved. Use app_state to see what the user is looking at (including the board item \
+they selected and edits they made by hand), show_on_board to point at the findings, parts and layers you're discussing, and \
+propose_fix instead of apply_fix so the user reviews automatic fixes on the board before they're written.";
+
+/// Set by the desktop app when it starts this server for its built-in agent chat. The app tools talk to the
+/// app window over a localhost socket guarded by a token.
+pub const APP_ADDR_ENV: &str = "FABREADY_APP_ADDR";
+pub const APP_TOKEN_ENV: &str = "FABREADY_APP_TOKEN";
+/// The project the agent session belongs to, so the app can tell when the user has switched to another one.
+pub const APP_PROJECT_ENV: &str = "FABREADY_APP_PROJECT";
+
+struct AppLink {
+    addr: String,
+    token: String,
+    project: String,
+}
+
+fn app_link() -> Option<AppLink> {
+    Some(AppLink {
+        addr: std::env::var(APP_ADDR_ENV).ok()?,
+        token: std::env::var(APP_TOKEN_ENV).ok()?,
+        project: std::env::var(APP_PROJECT_ENV).unwrap_or_default(),
+    })
+}
+
+/// One request to the app window: a JSON line out, a JSON line back.
+fn app_call(link: &AppLink, method: &str, params: Value) -> Result<Value> {
+    use std::io::BufReader;
+    let mut stream = std::net::TcpStream::connect(&link.addr).map_err(|e| anyhow::anyhow!("the fabready app isn't reachable ({e})"))?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(60)))?;
+    let msg = json!({"token": link.token, "project": link.project, "method": method, "params": params});
+    writeln!(stream, "{msg}")?;
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line)?;
+    let reply: Value = serde_json::from_str(&line).map_err(|_| anyhow::anyhow!("the fabready app closed the connection"))?;
+    match reply.get("error").and_then(Value::as_str) {
+        Some(e) => anyhow::bail!("{e}"),
+        None => Ok(reply.get("result").cloned().unwrap_or(Value::Null)),
+    }
+}
+
+fn app_tools() -> Value {
+    json!([
+        {
+            "name": "app_state",
+            "title": "What the user is looking at",
+            "description": "The project open in the fabready app, its check status, the finding the user has selected (numbered as \
+in the app), the tracks, vias and footprints they selected on the board (selected_items), the layers on screen and which side the board \
+is viewed from (view), edits they made by hand this session (manual_edits), the inspector tab and any fix preview on screen. \
+Call it when the user says \"this\", \"here\" or \"the selected one\".",
+            "inputSchema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": true}
+        },
+        {
+            "name": "show_on_board",
+            "title": "Point at the board",
+            "description": "Point the user at something in the app: select a finding by its number (as shown in the app, 1-based) \
+and/or highlight footprints by reference. It can also change the view: show only some layers (e.g. [\"B.Cu\", \"Edge.Cuts\"]) or \
+look at the board from the bottom. Use it whenever you discuss a specific finding, part or layer.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "finding": {"type": "integer", "minimum": 1, "description": "Finding number as shown in the app."},
+                    "refs": {"type": "array", "items": {"type": "string"}, "description": "Footprint references, e.g. [\"SW5\", \"D5\"]."},
+                    "layers": {"type": "array", "items": {"type": "string"}, "description": "KiCad layer names to show; every other layer is hidden."},
+                    "side": {"type": "string", "enum": ["top", "bottom"], "description": "View the board from the top or from the bottom (mirrored)."}
+                }
+            },
+            "annotations": {"readOnlyHint": true}
+        },
+        {
+            "name": "propose_fix",
+            "title": "Propose automatic fixes",
+            "description": "Open fabready's fix preview in the app: the board as it would be after the fixes, with error counts before \
+and after. The user reviews it and clicks Apply or Cancel. Pass fix ids from list_fixes, or [\"all\"]. Returns right away; \
+call app_state or check_board later to see what the user decided.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"fixes": {"type": "array", "items": {"type": "string"}, "minItems": 1}},
+                "required": ["fixes"]
+            },
+            "annotations": {"readOnlyHint": true}
+        }
+    ])
+}
+
 fn tools() -> Value {
+    let mut all = base_tools();
+    if app_link().is_some() {
+        all.as_array_mut().unwrap().extend(app_tools().as_array().unwrap().iter().cloned());
+    }
+    all
+}
+
+fn base_tools() -> Value {
     let path = json!({"type": "string", "description": "KiCad project directory, .kicad_pro, or .kicad_pcb path (absolute)."});
     json!([
         {
@@ -124,7 +219,7 @@ fn server_info(version: &str) -> Value {
         "protocolVersion": version,
         "capabilities": {"tools": {"listChanged": false}},
         "serverInfo": {"name": "fabready", "title": "fabready", "version": report::VERSION},
-        "instructions": INSTRUCTIONS
+        "instructions": if app_link().is_some() { format!("{INSTRUCTIONS}{APP_INSTRUCTIONS}") } else { INSTRUCTIONS.to_string() }
     })
 }
 
@@ -271,6 +366,11 @@ your own datasheet knowledge using value, footprint, mpn and pins; say which con
             let backup = args.get("backup").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("missing 'backup'"))?;
             fixes::restore(&path, std::path::Path::new(backup))?;
             Ok(text_result(format!("Restored {backup}. Reload the board in KiCad if it is open."), None, false))
+        }
+        "app_state" | "show_on_board" | "propose_fix" => {
+            let link = app_link().ok_or_else(|| anyhow::anyhow!("only available inside the fabready app"))?;
+            let value = app_call(&link, name, args.clone())?;
+            Ok(text_result(serde_json::to_string_pretty(&value)?, Some(value), false))
         }
         other => anyhow::bail!("unknown tool '{other}'"),
     }

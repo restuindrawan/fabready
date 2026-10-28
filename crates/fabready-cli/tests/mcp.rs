@@ -67,3 +67,58 @@ fn mcp_initialize_list_and_call() {
     drop(stdin);
     assert!(child.wait().unwrap().success());
 }
+
+#[test]
+fn app_tools_relay_to_the_app_window() {
+    // Stand-in for the desktop app's bridge: one JSON line in, one JSON line out.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        BufReader::new(&stream).read_line(&mut line).unwrap();
+        let req: Value = serde_json::from_str(&line).unwrap();
+        writeln!(&stream, "{}", json!({"result": {"shown": req["params"]["refs"]}})).unwrap();
+        req
+    });
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fabready"))
+        .arg("mcp")
+        .env("FABREADY_NO_AGENT_RECORD", "1")
+        .env("FABREADY_APP_ADDR", &addr)
+        .env("FABREADY_APP_TOKEN", "secret")
+        .env("FABREADY_APP_PROJECT", "/boards/macropad")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut call = |msg: Value| {
+        writeln!(stdin, "{msg}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        out.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+
+    let init = call(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}));
+    assert!(init["result"]["instructions"].as_str().unwrap().contains("show_on_board"));
+    let tools = call(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}));
+    let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(names.ends_with(&["app_state", "show_on_board", "propose_fix"]), "{names:?}");
+
+    let shown = call(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"show_on_board","arguments":{"refs":["SW5"]}}}));
+    assert_eq!(shown["result"]["structuredContent"]["shown"], json!(["SW5"]));
+    let req = app.join().unwrap();
+    assert_eq!(req["token"], "secret");
+    assert_eq!(req["method"], "show_on_board");
+    assert_eq!(req["project"], "/boards/macropad");
+
+    // Nobody listening any more: the tool reports the error to the model instead of failing the call.
+    let gone = call(json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"app_state","arguments":{}}}));
+    assert_eq!(gone["result"]["isError"], true);
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
