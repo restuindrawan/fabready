@@ -38,7 +38,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Kinds pcbcheck can judge; the rest (connectors, switches, ...) are listed but not rated.
+    /// Kinds fabready can judge; the rest (connectors, switches, ...) are listed but not rated.
     fn evaluable(self) -> bool {
         matches!(self, Kind::Resistor | Kind::Capacitor | Kind::Diode | Kind::Led | Kind::Transistor | Kind::Regulator | Kind::Ic)
     }
@@ -79,7 +79,7 @@ pub struct Stress {
     pub current_a: Option<f64>,
     pub vin_v: Option<f64>,
     pub supply_v: Option<f64>,
-    /// Expected load (from pcbcheck.json `power.current_ma`) for regulators.
+    /// Expected load (from fabready.json `power.current_ma`) for regulators.
     pub load_a: Option<f64>,
 }
 
@@ -114,7 +114,7 @@ pub struct Part {
     pub stress: Stress,
     /// Nets on each pin of the first part in the line: `pad -> net (volts)`.
     pub pins: Vec<String>,
-    /// `ok`, `under`, `over`, `unknown`, or `na` (not something pcbcheck rates, e.g. connectors).
+    /// `ok`, `under`, `over`, `unknown`, or `na` (not something fabready rates, e.g. connectors).
     pub verdict: String,
     pub notes: Vec<Note>,
     #[serde(skip)]
@@ -816,7 +816,7 @@ pub fn evaluate(parts: &mut [Part]) -> Vec<Finding> {
                         over.push(format!("Rated {} for a {} load. A smaller regulator (150–300 mA, SOT-23) is cheaper and smaller.", fmt(iout, "A"), fmt(load, "A")));
                     }
                 } else if s.current_a.is_some() && st.load_a.is_none() {
-                    info.push("Set the expected load in pcbcheck.json (`power.current_ma`) to check whether this regulator is sized right.".into());
+                    info.push("Set the expected load in fabready.json (`power.current_ma`) to check whether this regulator is sized right.".into());
                 }
             }
             _ => {}
@@ -846,7 +846,7 @@ pub fn evaluate(parts: &mut [Part]) -> Vec<Finding> {
         .into();
         if part.verdict == "unknown" {
             info.push(
-                if any_rating { "The board's voltages around this part are unknown; name rails like +3V3/+5V or set them in pcbcheck.json." } else { "No ratings known. Put the rating in the value or Description field (e.g. \"10uF 16V\"), or ask your agent to review it." }.into(),
+                if any_rating { "The board's voltages around this part are unknown; name rails like +3V3/+5V or set them in fabready.json." } else { "No ratings known. Put the rating in the value or Description field (e.g. \"10uF 16V\"), or ask your agent to review it." }.into(),
             );
         }
         for (id, sev, msg) in under {

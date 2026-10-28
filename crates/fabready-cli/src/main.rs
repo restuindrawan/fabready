@@ -3,13 +3,13 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use pcbcheck_core::config::PROFILE_NAMES;
-use pcbcheck_core::keyboard;
-use pcbcheck_core::report::{self, default_out_dir, Options};
-use pcbcheck_core::{kicad, mcp, Severity, CATALOG};
+use fabready_core::config::PROFILE_NAMES;
+use fabready_core::keyboard;
+use fabready_core::report::{self, default_out_dir, Options};
+use fabready_core::{kicad, mcp, Severity, CATALOG};
 
 #[derive(Parser)]
-#[command(name = "pcbcheck", version, about = "Pre-order checks for KiCad PCBs (with extra checks for keyboards).")]
+#[command(name = "fabready", version, about = "Pre-order checks for KiCad PCBs (with extra checks for keyboards).")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -24,10 +24,10 @@ enum Cmd {
         /// Fab rules profile (jlcpcb, safe)
         #[arg(long)]
         profile: Option<String>,
-        /// Path to pcbcheck.json (default: next to the board)
+        /// Path to fabready.json (default: next to the board)
         #[arg(long)]
         config: Option<PathBuf>,
-        /// Output directory (default: <project>/pcbcheck-out)
+        /// Output directory (default: <project>/fabready-out)
         #[arg(long)]
         out: Option<PathBuf>,
         /// Print the full JSON result to stdout
@@ -157,9 +157,9 @@ fn parts(path: PathBuf, profile: Option<String>, config: Option<PathBuf>, json: 
         println!("{}  {:<14} {:<22} {}", mark(&p.verdict), refs, p.value, p.package.as_deref().unwrap_or(""));
         for n in &p.notes {
             let tag = match n.level {
-                pcbcheck_core::parts::Level::Under => "!",
-                pcbcheck_core::parts::Level::Over => "↓",
-                pcbcheck_core::parts::Level::Info => "·",
+                fabready_core::parts::Level::Under => "!",
+                fabready_core::parts::Level::Over => "↓",
+                fabready_core::parts::Level::Info => "·",
             };
             println!("           {tag} {}", n.text);
         }
@@ -178,8 +178,8 @@ fn parts(path: PathBuf, profile: Option<String>, config: Option<PathBuf>, json: 
 
 fn matrix(path: PathBuf, config: Option<PathBuf>, json: bool) -> Result<ExitCode> {
     let (pcb, _) = report::resolve(&path)?;
-    let cfg = pcbcheck_core::config::Config::load(pcb.parent().unwrap(), config.as_deref())?;
-    let board = pcbcheck_core::board::load(&pcb)?;
+    let cfg = fabready_core::config::Config::load(pcb.parent().unwrap(), config.as_deref())?;
+    let board = fabready_core::board::load(&pcb)?;
     let (_, matrix) = keyboard::check(&board, &cfg.keyboard);
     let Some(m) = matrix else {
         eprintln!("No key switches found.");
@@ -230,7 +230,7 @@ fn explain(id: Option<String>) -> Result<ExitCode> {
 }
 
 fn doctor() -> Result<ExitCode> {
-    println!("pcbcheck {}", report::VERSION);
+    println!("fabready {}", report::VERSION);
     match kicad::find_cli() {
         Some(cli) => println!("kicad-cli: {}  ({})", cli.display(), kicad::version(&cli)),
         None => println!("kicad-cli: not found  -> brew install --cask kicad"),

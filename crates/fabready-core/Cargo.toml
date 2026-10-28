@@ -1,10 +1,11 @@
 [package]
-name = "pcbcheck-core"
+name = "fabready-core"
 description = "KiCad PCB checks, renderer and report model"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
 
 [features]
 default = ["png", "mcp"]

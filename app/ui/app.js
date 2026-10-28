@@ -1,6 +1,6 @@
-// pcbcheck desktop shell, laid out like an agent app:
-// sidebar (projects) · board canvas · inspector (findings / matrix / board).
-// The canvas and inspector content come from the shared PcbViewer (crates/pcbcheck-core/assets).
+// fabready desktop shell, laid out like an agent app:
+// sidebar (projects) · board canvas · inspector (findings / parts / board / settings).
+// The canvas and inspector content come from the shared PcbViewer (crates/fabready-core/assets).
 (async function () {
   "use strict";
   const { invoke } = window.__TAURI__.core;
@@ -39,23 +39,23 @@
 
   // ------------------------------------------------------------ state
   const store = {
-    get: (k, d) => { try { return JSON.parse(localStorage.getItem("pcbcheck." + k)) ?? d; } catch { return d; } },
-    set: (k, v) => localStorage.setItem("pcbcheck." + k, JSON.stringify(v)),
+    get: (k, d) => { try { return JSON.parse(localStorage.getItem("fabready." + k)) ?? d; } catch { return d; } },
+    set: (k, v) => localStorage.setItem("fabready." + k, JSON.stringify(v)),
   };
   const state = {
     path: null,
     payload: null, // latest {report, svg} for the open project
-    profile: store.get("profile", "jlcpcb"),
     projects: store.get("projects", []),
-    tab: ["findings", "parts", "board"].includes(store.get("tab", "findings")) ? store.get("tab", "findings") : "findings",
+    tab: ["findings", "parts", "board", "settings"].includes(store.get("tab", "findings")) ? store.get("tab", "findings") : "findings",
     activePart: null,
     filter: "all",
     active: null, // selected finding index
     preview: null, // {ids, report, svg, before, changes, token} while previewing fixes
     agent: null, // last agent seen over MCP
     exe: null, // this app's binary (for MCP setup text)
+    cfg: null, // project settings (fabready.json) for the Settings tab, see loadConfig
+    watching: false, // the file watcher re-checks after each save
   };
-  $("profile").value = state.profile;
   app.dataset.sidebar = store.get("sidebar", "open");
   app.dataset.inspector = store.get("inspector", "open");
   app.style.setProperty("--ins-open-w", store.get("insWidth", 360) + "px");
@@ -110,9 +110,9 @@
 
   // ------------------------------------------------------------ header + inspector
   function renderHeader() {
-    $("project-name").textContent = state.path ? basename(state.path) : "pcbcheck";
+    $("project-name").textContent = state.path ? basename(state.path) : "fabready";
     $("project-path").textContent = state.path || "";
-    document.title = state.path ? `${basename(state.path)} — pcbcheck` : "pcbcheck";
+    document.title = state.path ? `${basename(state.path)} — fabready` : "fabready";
     const r = state.payload && state.payload.report;
     if (r) {
       const t = r.tools || {};
@@ -126,6 +126,7 @@
     const body = $("ins-body");
     const scroll = body.scrollTop;
     if (state.preview) {
+      body.dataset.view = "preview";
       // Preview: what changes, then the findings as they'd be afterwards.
       document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === "findings")));
       $("filters").hidden = true;
@@ -138,6 +139,12 @@
     document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
     const filters = $("filters");
     filters.hidden = state.tab !== "findings" || !r.findings.length;
+    if (state.tab === "settings") {
+      // The form keeps its own state; re-rendering on every re-check would steal focus while typing.
+      if (body.dataset.view !== "settings") renderSettings();
+      return;
+    }
+    body.dataset.view = state.tab;
     filters.innerHTML = [["all", "All", r.findings.length], ["error", "Errors", s.error], ["warning", "Warnings", s.warning], ["info", "Info", s.info]]
       .map(([id, label, n]) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label}<span class="n">${n}</span></button>`).join("");
     body.innerHTML = state.tab === "findings" ? fixCard(r) + V.findingsHtml(r, state.filter, state.active, { actions: true })
@@ -167,6 +174,7 @@
     $("welcome").hidden = true;
     $("canvas").hidden = false;
     for (const id of ["profile-field", "recheck", "export", "toggle-inspector"]) $(id).hidden = false;
+    $("profile").value = payload.report.profile;
     canvas.update(payload.svg, payload.report.board);
     if (state.active != null && !payload.report.findings[state.active]) state.active = null;
     const f = state.active != null ? payload.report.findings[state.active] : null;
@@ -203,7 +211,7 @@
     busy(true);
     const path = state.path;
     try {
-      const payload = await invoke("check_path", { path, profile: state.profile });
+      const payload = await invoke("check_path", { path });
       if (path === state.path) accept(payload);
     } catch (e) {
       toast(String(e), "error");
@@ -214,14 +222,19 @@
 
   async function openProject(path) {
     if (!path) return;
+    if (dirty()) toast(`Unsaved settings for ${basename(state.path)} were discarded.`);
     state.path = path;
     state.active = null;
+    state.cfg = null;
+    state.watching = false;
+    if (state.tab === "settings") loadConfig();
     rememberProject(path, null);
     renderHeader();
     await check();
-    // Re-check silently whenever the board, schematic or pcbcheck.json is saved.
+    // Re-check silently whenever the board, schematic or fabready.json is saved.
     try {
       await invoke("watch", { path });
+      state.watching = path === state.path;
     } catch (e) {
       toast("Auto re-check on save is unavailable: " + e, "error");
     }
@@ -244,7 +257,7 @@
     if (!state.path) return;
     busy(true);
     try {
-      const p = await invoke("preview_fixes", { path: state.path, profile: state.profile, fixes: ids });
+      const p = await invoke("preview_fixes", { path: state.path, fixes: ids });
       state.preview = Object.assign({ ids }, p);
       state.active = null;
       const after = p.report.summary;
@@ -273,7 +286,7 @@
     const p = state.preview;
     if (!p) return;
     try {
-      const done = await invoke("apply_fixes", { path: state.path, profile: state.profile, fixes: p.ids, token: p.token });
+      const done = await invoke("apply_fixes", { path: state.path, fixes: p.ids, token: p.token });
       endPreview();
       const n = done.changes.length;
       toast(`Applied ${n} fix${n === 1 ? "" : "es"} · errors ${done.before.error} → ${done.after.error}. If the board is open in KiCad, reload it (File → Revert).`,
@@ -295,6 +308,261 @@
     }
   }
 
+  // ------------------------------------------------------------ project settings (fabready.json)
+  const PROFILE_LABELS = { jlcpcb: "JLCPCB", safe: "Safe (any fab)" };
+  const DEFAULT_PROFILE = "jlcpcb";
+  const KB_PITCH = [["key_pitch", "Key pitch"], ["key_pitch_x", "Horizontal pitch"], ["key_pitch_y", "Vertical pitch"]];
+  const str = (v) => (v == null ? "" : String(v));
+  /** JSON with sorted keys, to compare configs regardless of key order. */
+  const canon = (v) => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort()) : x));
+
+  /** Config (as fabready reads it) -> form fields (strings, rows). */
+  function toForm(c) {
+    const kb = c.keyboard || {};
+    const power = c.power || {};
+    const rows = (o) => Object.entries(o || {}).map(([net, v]) => ({ net, value: str(v) }));
+    return {
+      profile: c.profile || DEFAULT_PROFILE,
+      fab: Object.fromEntries(Object.entries(c.fab || {}).map(([k, v]) => [k, str(v)])),
+      rails: rows(power.rails),
+      loads: rows(power.current_ma),
+      kb: { key_pitch: str(kb.key_pitch), key_pitch_x: str(kb.key_pitch_x), key_pitch_y: str(kb.key_pitch_y),
+        switch_regex: kb.switch_regex || "", controller_regex: kb.controller_regex || "" },
+      ignore: [...(c.ignore || [])],
+      newIgnore: "",
+    };
+  }
+
+  /** Form fields -> {config, errors}. Range checks happen in Rust when saving. */
+  function fromForm(f) {
+    const errors = [];
+    const num = (s, what) => {
+      const t = s.trim().replace(",", ".");
+      if (!t) return null;
+      const n = Number(t);
+      if (Number.isFinite(n)) return n;
+      errors.push(`${what}: "${s.trim()}" isn't a number`);
+      return null;
+    };
+    const fab = {};
+    for (const [k, v] of Object.entries(f.fab)) {
+      const n = num(v, V.RULE_LABELS[k] || k);
+      if (n != null) fab[k] = n;
+    }
+    const byNet = (list, what) => {
+      const out = {};
+      for (const row of list) {
+        const net = row.net.trim();
+        const n = num(row.value, net ? `${what} ${net}` : what);
+        if (!net && !row.value.trim()) continue;
+        if (!net) errors.push(`${what}: add a net name`);
+        else if (!row.value.trim()) errors.push(`${what} ${net}: add a value`);
+        else if (net in out) errors.push(`${what}: ${net} is listed twice`);
+        else if (n != null) out[net] = n;
+      }
+      return out;
+    };
+    const keyboard = { switch_regex: f.kb.switch_regex.trim() || null, controller_regex: f.kb.controller_regex.trim() || null };
+    for (const [k, label] of KB_PITCH) keyboard[k] = num(f.kb[k], label);
+    const saved = state.cfg.saved;
+    // Leave an unset profile unset when the form still shows the default.
+    const profile = f.profile === (saved.profile || DEFAULT_PROFILE) ? saved.profile : f.profile;
+    const power = { rails: byNet(f.rails, "Power rail"), current_ma: byNet(f.loads, "Load") };
+    return { errors, config: { profile, fab, keyboard, power, ignore: f.ignore } };
+  }
+
+  function dirty() {
+    const c = state.cfg;
+    if (!c || !c.draft) return false;
+    const { errors, config } = fromForm(c.draft);
+    return errors.length > 0 || canon(config) !== canon(c.saved);
+  }
+
+  async function loadConfig() {
+    const path = state.path;
+    if (!path) return;
+    try {
+      const view = await invoke("load_config", { path });
+      if (path !== state.path || dirty()) return;
+      const prev = state.cfg && state.cfg.path === path ? state.cfg : null;
+      if (prev && prev.error === view.error && prev.exists === view.exists && canon(prev.saved) === canon(view.config)) return;
+      state.cfg = Object.assign(view, { path, saved: view.config, draft: view.config ? toForm(view.config) : null });
+      if (state.tab === "settings" && state.payload && !state.preview) renderSettings();
+    } catch (e) {
+      toast(String(e), "error");
+    }
+  }
+
+  function renderSettings() {
+    const body = $("ins-body");
+    const keep = body.dataset.view === "settings";
+    const scroll = body.scrollTop;
+    body.dataset.view = "settings";
+    $("filters").hidden = true;
+    body.innerHTML = settingsHtml();
+    body.scrollTop = keep ? scroll : 0;
+    updateBar();
+  }
+
+  function describeWaiver(c, pattern) {
+    const [id, ref] = pattern.split(":");
+    const hit = c.checks.find((x) => x.id === id);
+    const what = id.endsWith("*") ? `Every ${id.slice(0, -1)}* check` : hit ? hit.title : "";
+    return [what, ref && `${ref} only`].filter(Boolean).join(" · ");
+  }
+
+  function settingsHtml() {
+    const c = state.cfg;
+    if (!c || c.path !== state.path) return '<div class="pcbv-empty">Loading settings…</div>';
+    const where = `<div class="pcbv-note">Saved in <code title="${esc(c.file)}">fabready.json</code> next to the board, so the command line and connected agents use the same settings.` +
+      (c.exists ? "" : " The file doesn't exist yet. fabready uses its defaults until you save.") + "</div>";
+    const problem = c.error ? `<div class="pcbv-note bad">${esc(c.error)}</div>` : "";
+    if (!c.draft) return where + problem + '<div class="pcbv-note">Fix the file in a text editor. The app reloads it when you save.</div>';
+    const d = c.draft;
+    const field = (key, value, placeholder, unit, attrs) =>
+      `<span class="field"><input id="cfg-${esc(key)}" data-k="${esc(key)}" value="${esc(value)}" placeholder="${esc(placeholder)}" spellcheck="false" autocomplete="off" ${attrs || ""}>` +
+      (unit ? `<span class="unit">${unit}</span>` : "") + "</span>";
+    const del = (list, i, label) => `<button class="icon-btn x" data-act="cfg-del" data-list="${list}" data-i="${i}" aria-label="${esc(label)}" title="${esc(label)}">${icon("x")}</button>`;
+
+    // Fab rules: the profile's limits are the placeholders; a typed value overrides it.
+    const defaults = c.profiles[d.profile] || {};
+    const profileName = PROFILE_LABELS[d.profile] || d.profile;
+    const rules = [...new Set([...Object.keys(defaults), ...Object.keys(d.fab)])].map((k) => {
+      const def = defaults[k];
+      const over = (d.fab[k] || "").trim() !== "";
+      return `<div class="set-row${over ? " over" : ""}"><label for="cfg-fab.${esc(k)}" title="${def != null ? esc(`${profileName}: ${def} mm`) : ""}">${esc(V.RULE_LABELS[k] || k)}</label>` +
+        field(`fab.${k}`, d.fab[k] || "", def != null ? String(def) : "", "mm", 'inputmode="decimal"') + "</div>";
+    }).join("");
+    const options = Object.keys(c.profiles).map((p) => `<option value="${esc(p)}"${p === d.profile ? " selected" : ""}>${esc(PROFILE_LABELS[p] || p)}</option>`).join("");
+    const fab = '<div class="pcbv-group">Fab Rules</div><div class="set-help">Leave a limit empty to use the profile\'s value.</div>' +
+      `<div class="set-row"><label for="cfg-profile">Profile</label><label class="select"><select id="cfg-profile" data-k="profile">${options}</select></label></div>` + rules;
+
+    const kv = (list, netHint, unit, hint, noun) => d[list].map((row, i) =>
+      `<div class="kv-row">${field(`${list}.${i}.net`, row.net, netHint, "", 'list="cfg-nets"')}${field(`${list}.${i}.value`, row.value, hint, unit, 'inputmode="decimal"')}${del(list, i, `Remove ${noun}`)}</div>`).join("") +
+      `<button class="set-add" data-act="cfg-add" data-list="${list}">Add ${noun}</button>`;
+    const power = '<div class="pcbv-group">Power Rails</div><div class="set-help">Voltages for nets whose names don\'t say, like VCC or VIN. Names like +3V3 and VBUS are read automatically.</div>' +
+      kv("rails", "Net, e.g. VCC", "V", "3.3", "rail") +
+      '<div class="pcbv-group">Expected Loads</div><div class="set-help">Current drawn from each rail, used to check that regulators are big enough.</div>' +
+      kv("loads", "Net, e.g. +3V3", "mA", "50", "load");
+
+    const r = state.payload && state.payload.report;
+    const keys = r && r.matrix && r.matrix.keys ? r.matrix.keys.length : 0;
+    const kbSet = Object.values(d.kb).some((v) => v.trim());
+    const kb = `<details class="set-details"${keys || kbSet ? " open" : ""}><summary class="pcbv-group">Keyboard</summary>` +
+      `<div class="set-help">${keys ? `Found ${keys} key switch${keys === 1 ? "" : "es"}.` : "No key switches found. If your switch footprints have unusual names, add a pattern."}` +
+      " Patterns are regular expressions matched against footprint names.</div>" +
+      KB_PITCH.map(([k, label]) => `<div class="set-row"><label for="cfg-kb.${k}">${label}</label>${field(`kb.${k}`, d.kb[k], k === "key_pitch" ? "Auto" : "Key pitch", "mm", 'inputmode="decimal"')}</div>`).join("") +
+      `<div class="set-row wide"><label for="cfg-kb.switch_regex">Switch footprints</label>${field("kb.switch_regex", d.kb.switch_regex, "Built-in (MX, Choc, Gateron…)", "", 'class="mono"')}</div>` +
+      `<div class="set-row wide"><label for="cfg-kb.controller_regex">Controller footprints</label>${field("kb.controller_regex", d.kb.controller_regex, "Built-in (nice!nano, XIAO, RP2040…)", "", 'class="mono"')}</div></details>`;
+
+    const waived = `<div class="pcbv-group">Waived Findings${d.ignore.length ? `<span class="n">${d.ignore.length}</span>` : ""}</div>` +
+      '<div class="set-help">Findings you\'ve decided are fine. Use a check ID, <code>id:REF</code> for one part, or <code>prefix.*</code> for a group.</div>' +
+      (d.ignore.length ? `<ul class="set-list">${d.ignore.map((p, i) => `<li><div class="grow"><code>${esc(p)}</code><div class="t">${esc(describeWaiver(c, p))}</div></div>${del("ignore", i, `Stop waiving ${p}`)}</li>`).join("")}</ul>` : "") +
+      `<div class="set-addrow">${field("newIgnore", d.newIgnore, "e.g. board.no-mounting-holes", "", 'list="cfg-checks" class="mono"')}<button class="btn" data-act="cfg-add-ignore">Add</button></div>`;
+
+    const lists = `<datalist id="cfg-nets">${c.nets.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>` +
+      `<datalist id="cfg-checks">${c.checks.map((x) => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("")}</datalist>`;
+    const bar = '<div class="set-bar"><span class="set-state" id="cfg-state" role="status"></span>' +
+      '<button class="btn" data-act="cfg-revert" id="cfg-revert">Revert</button><button class="btn primary" data-act="cfg-save" id="cfg-save" title="Save (⌘S)">Save</button></div>';
+    return where + problem + fab + power + kb + waived + lists + bar;
+  }
+
+  function updateBar(message) {
+    const el = $("cfg-state");
+    if (!el) return;
+    const changed = dirty();
+    $("cfg-save").disabled = !changed;
+    $("cfg-revert").disabled = !changed;
+    el.classList.toggle("bad", !!message);
+    el.textContent = message || (changed ? "Unsaved changes" : state.cfg.exists ? "Saved" : "Using defaults");
+  }
+
+  async function saveSettings() {
+    const c = state.cfg;
+    if (!c || !c.draft) return;
+    const { errors, config } = fromForm(c.draft);
+    if (errors.length) return updateBar(errors[0]);
+    try {
+      await invoke("save_config", { path: c.path, config });
+      Object.assign(c, { saved: config, exists: true, error: null, draft: Object.assign(toForm(config), { newIgnore: c.draft.newIgnore }) });
+      renderSettings();
+      toast("Saved fabready.json. Re-checking the board.");
+      if (!state.watching) await check();
+    } catch (e) {
+      updateBar(String(e));
+    }
+  }
+
+  function addWaiver() {
+    const d = state.cfg.draft;
+    const p = d.newIgnore.trim();
+    if (p && !d.ignore.includes(p)) d.ignore.push(p);
+    d.newIgnore = "";
+    renderSettings();
+    $("cfg-newIgnore").focus();
+  }
+
+  function settingsAction(act) {
+    const c = state.cfg;
+    if (!c || !c.draft) return;
+    const list = act.dataset.list;
+    if (act.dataset.act === "cfg-add") {
+      c.draft[list].push({ net: "", value: "" });
+      renderSettings();
+      $(`cfg-${list}.${c.draft[list].length - 1}.net`).focus();
+    } else if (act.dataset.act === "cfg-del") {
+      c.draft[list].splice(+act.dataset.i, 1);
+      renderSettings();
+    } else if (act.dataset.act === "cfg-add-ignore") addWaiver();
+    else if (act.dataset.act === "cfg-save") saveSettings();
+    else if (act.dataset.act === "cfg-revert") {
+      c.draft = toForm(c.saved);
+      renderSettings();
+    }
+  }
+
+  /** Change fabready.json on disk (header profile, Waive) without losing unsaved edits in the form. */
+  async function updateConfig(change) {
+    const path = state.path;
+    if (!path) return false;
+    try {
+      const view = await invoke("load_config", { path });
+      if (!view.config) throw new Error(view.error);
+      const next = view.config;
+      change(next);
+      await invoke("save_config", { path, config: next });
+      const c = state.cfg;
+      if (c && c.path === path && c.draft) {
+        const draft = dirty() ? fromForm(c.draft) : null;
+        Object.assign(c, { saved: next, exists: true, error: null });
+        if (!draft) c.draft = toForm(next);
+        else if (!draft.errors.length) {
+          change(draft.config);
+          c.draft = toForm(draft.config);
+        }
+        if (state.tab === "settings" && !state.preview) renderSettings();
+      }
+      if (!state.watching) await check();
+      return true;
+    } catch (e) {
+      toast(String(e), "error");
+      if (state.payload) $("profile").value = state.payload.report.profile;
+      return false;
+    }
+  }
+
+  async function waive(i) {
+    const f = state.payload && state.payload.report.findings[i];
+    if (!f) return;
+    const pattern = f.refs && f.refs.length === 1 ? `${f.id}:${f.refs[0]}` : f.id;
+    if (!(await updateConfig((c) => { if (!c.ignore.includes(pattern)) c.ignore.push(pattern); }))) return;
+    state.active = null;
+    canvas.focus(null);
+    renderInspector();
+    toast(`Waived ${pattern}. You can undo it later in Settings.`, null,
+      { label: "Undo", run: () => updateConfig((c) => { c.ignore = c.ignore.filter((p) => p !== pattern); }) });
+  }
+
   // ------------------------------------------------------------ agent hand-off
   async function refreshAgent() {
     try { state.agent = await invoke("agent_status"); } catch { state.agent = null; }
@@ -302,7 +570,7 @@
     el.hidden = !state.agent;
     if (state.agent) {
       el.textContent = `Agent: ${state.agent.client} · ${ago(state.agent.at * 1000)}`;
-      el.title = "Last agent that connected to pcbcheck over MCP";
+      el.title = "Last agent that connected to fabready over MCP";
     }
   }
 
@@ -317,18 +585,18 @@
       else if (f.fix) lines.push(`   Suggested fix: ${f.fix}`);
       return lines.join("\n");
     }).join("\n\n");
-    const setup = state.exe ? `claude mcp add pcbcheck -- "${state.exe}" mcp` : "the Connect agents dialog in the pcbcheck app";
+    const setup = state.exe ? `claude mcp add fabready -- "${state.exe}" mcp` : "the Connect agents dialog in the fabready app";
     return [
       `Please fix ${indices.length === 1 ? "this issue" : "these issues"} in my KiCad PCB project before I order it.`,
       "",
       `Project: ${state.path}`,
-      `Fab profile: ${state.profile}`,
+      `Fab profile: ${r.profile}`,
       "",
       items,
       "",
-      "Use the pcbcheck MCP tools: call check_board on the project, use list_fixes and apply_fix (dry_run first) for anything with an automatic fix, and edit the KiCad files yourself for the rest. For wiring problems, change the schematic first, then update the PCB. Call check_board again to confirm these are gone and nothing new appeared. Don't change unrelated parts of the design.",
+      "Use the fabready MCP tools: call check_board on the project, use list_fixes and apply_fix (dry_run first) for anything with an automatic fix, and edit the KiCad files yourself for the rest. For wiring problems, change the schematic first, then update the PCB. Call check_board again to confirm these are gone and nothing new appeared. Don't change unrelated parts of the design.",
       "",
-      `If the pcbcheck tools aren't connected, add them with ${setup}, or tell me and I'll paste the report.`,
+      `If the fabready tools aren't connected, add them with ${setup}, or tell me and I'll paste the report.`,
     ].join("\n");
   }
 
@@ -363,13 +631,12 @@
   $("show-sidebar").onclick = () => setPanel("sidebar", "open");
   $("toggle-inspector").onclick = () => setPanel("inspector", app.dataset.inspector === "open" ? "closed" : "open");
   $("profile").onchange = (e) => {
-    state.profile = e.target.value;
-    store.set("profile", state.profile);
-    check();
+    const profile = e.target.value;
+    updateConfig((c) => { c.profile = profile; });
   };
   $("export").onclick = async () => {
     try {
-      const dir = await invoke("export_report", { path: state.path, profile: state.profile });
+      const dir = await invoke("export_report", { path: state.path });
       toast(`Exported to ${dir}\nviewer.html · report.md · report.json · board.png`);
     } catch (e) {
       toast(String(e), "error");
@@ -397,6 +664,7 @@
     if (!b) return;
     state.tab = b.dataset.tab;
     store.set("tab", state.tab);
+    if (state.tab === "settings" && state.path && !(state.cfg && state.cfg.path === state.path)) loadConfig();
     renderInspector();
   });
   $("filters").addEventListener("click", (e) => {
@@ -414,6 +682,8 @@
       else if (act.dataset.act === "preview-all") startPreview(["all"]);
       else if (act.dataset.act === "ask-agent") askAgent([+act.dataset.idx]);
       else if (act.dataset.act === "ask-all" && r) askAgent(r.findings.map((f, i) => [f, i]).filter(([f]) => f.severity !== "info").map(([, i]) => i));
+      else if (act.dataset.act === "waive") waive(+act.dataset.idx);
+      else settingsAction(act);
       return;
     }
     const prt = e.target.closest(".prt");
@@ -431,6 +701,24 @@
     const i = +li.dataset.idx;
     if (i === state.active) { state.active = null; canvas.focus(null); renderInspector(); }
     else select(i, true);
+  });
+  // Settings form: edit the draft in place; only structural changes re-render.
+  $("ins-body").addEventListener("input", (e) => {
+    const k = e.target.dataset && e.target.dataset.k;
+    if (!k || !state.cfg || !state.cfg.draft) return;
+    const path = k.split(".");
+    let o = state.cfg.draft;
+    for (const p of path.slice(0, -1)) o = o[p];
+    o[path[path.length - 1]] = e.target.value;
+    if (k === "profile") renderSettings(); // placeholders follow the profile
+    else if (k.startsWith("fab.")) e.target.closest(".set-row").classList.toggle("over", e.target.value.trim() !== "");
+    updateBar();
+  });
+  $("ins-body").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.id === "cfg-newIgnore") {
+      e.preventDefault();
+      addWaiver();
+    }
   });
   $("pv-cancel").onclick = endPreview;
   $("pv-apply").onclick = applyPreview;
@@ -462,11 +750,15 @@
   await listen("check-started", () => busy(true));
   await listen("check-result", (e) => {
     busy(false);
-    if (state.path) accept(e.payload);
+    if (!state.path) return;
+    accept(e.payload);
+    // fabready.json may have been edited elsewhere; pick that up unless the form has unsaved edits.
+    if (state.cfg && !dirty()) loadConfig();
   });
   await listen("check-error", (e) => {
     busy(false);
     toast(String(e.payload), "error");
+    if (state.cfg && !dirty()) loadConfig();
   });
 
   // Drop a project folder or board file anywhere on the window.
@@ -481,8 +773,8 @@
   // Agents dialog: this same app binary is the MCP server (`<app> mcp`).
   $("agents").onclick = async () => {
     const exe = await invoke("mcp_command");
-    const json = JSON.stringify({ mcpServers: { pcbcheck: { command: exe, args: ["mcp"] } } }, null, 2);
-    const claude = `claude mcp add pcbcheck -- "${exe}" mcp`;
+    const json = JSON.stringify({ mcpServers: { fabready: { command: exe, args: ["mcp"] } } }, null, 2);
+    const claude = `claude mcp add fabready -- "${exe}" mcp`;
     $("mcp-json").textContent = json;
     $("mcp-claude").textContent = claude;
     $("copy-json").onclick = () => { copyText(json); toast("Copied MCP config"); };
@@ -509,6 +801,7 @@
       b: () => setPanel("sidebar", app.dataset.sidebar === "open" ? "closed" : "open"),
       i: () => setPanel("inspector", app.dataset.inspector === "open" ? "closed" : "open"),
       0: () => canvas.fit(),
+      s: () => state.tab === "settings" && dirty() && saveSettings(),
       enter: () => state.preview && applyPreview(),
     };
     if (e.shiftKey && e.key.toLowerCase() === "f" && state.payload && state.payload.report.fixes.length && !state.preview) {

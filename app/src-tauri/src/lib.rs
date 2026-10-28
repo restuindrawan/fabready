@@ -1,21 +1,21 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult, Debouncer};
-use pcbcheck_core::report::{self, default_out_dir, Options};
-use pcbcheck_core::render::{VIEWER_CSS, VIEWER_JS};
+use fabready_core::config::{self, Config, Rules};
+use fabready_core::report::{self, default_out_dir, Options};
+use fabready_core::render::{VIEWER_CSS, VIEWER_JS};
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 type Watcher = Debouncer<notify_debouncer_mini::notify::RecommendedWatcher>;
 
 #[derive(Default)]
 struct AppState {
     watcher: Mutex<Option<Watcher>>,
-    /// Profile used by live re-checks; updated whenever the UI runs a check.
-    profile: Mutex<Option<String>>,
 }
 
 #[derive(Serialize)]
@@ -30,9 +30,8 @@ struct CheckPayload {
     svg: String,
 }
 
-fn run_check(path: &Path, profile: Option<String>) -> Result<CheckPayload, String> {
-    let opts = Options { profile, ..Default::default() };
-    let result = report::run(path, &opts).map_err(|e| format!("{e:#}"))?;
+fn run_check(path: &Path) -> Result<CheckPayload, String> {
+    let result = report::run(path, &Options::default()).map_err(|e| format!("{e:#}"))?;
     Ok(CheckPayload { report: serde_json::to_value(&result.report).map_err(|e| e.to_string())?, svg: result.svg })
 }
 
@@ -42,18 +41,17 @@ fn viewer_assets() -> ViewerAssets {
 }
 
 #[tauri::command]
-async fn check_path(state: State<'_, AppState>, path: String, profile: Option<String>) -> Result<CheckPayload, String> {
-    *state.profile.lock().unwrap() = profile.clone();
-    tauri::async_runtime::spawn_blocking(move || run_check(Path::new(&path), profile)).await.map_err(|e| e.to_string())?
+async fn check_path(path: String) -> Result<CheckPayload, String> {
+    tauri::async_runtime::spawn_blocking(move || run_check(Path::new(&path))).await.map_err(|e| e.to_string())?
 }
 
 /// Write report.json/.md, viewer.html, board.svg/.png next to the project. Returns the output folder.
 #[tauri::command]
-async fn export_report(path: String, profile: Option<String>) -> Result<String, String> {
+async fn export_report(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (pcb, _) = report::resolve(Path::new(&path)).map_err(|e| format!("{e:#}"))?;
         let out_dir = default_out_dir(&pcb);
-        let opts = Options { profile, out_dir: Some(out_dir.clone()), ..Default::default() };
+        let opts = Options { out_dir: Some(out_dir.clone()), ..Default::default() };
         let mut result = report::run(&pcb, &opts).map_err(|e| format!("{e:#}"))?;
         report::write_outputs(&mut result, &out_dir, true).map_err(|e| format!("{e:#}"))?;
         Ok(out_dir.display().to_string())
@@ -65,7 +63,7 @@ async fn export_report(path: String, profile: Option<String>) -> Result<String, 
 fn is_relevant(p: &Path) -> bool {
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     // KiCad writes via temp files and backups; only react to the real design files and our config.
-    name == "pcbcheck.json"
+    name == "fabready.json"
         || (p.extension().is_some_and(|e| e == "kicad_pcb" || e == "kicad_sch") && !name.starts_with('_') && !name.starts_with('.'))
 }
 
@@ -81,9 +79,8 @@ fn watch(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<Str
         if !events.iter().any(|e| is_relevant(&e.path)) {
             return;
         }
-        let profile = handle.state::<AppState>().profile.lock().unwrap().clone();
         let _ = handle.emit("check-started", target.display().to_string());
-        match run_check(&target, profile) {
+        match run_check(&target) {
             Ok(payload) => {
                 let _ = handle.emit("check-result", payload);
             }
@@ -120,10 +117,10 @@ struct FixPreview {
 
 /// Board as it would be after the fixes (nothing is written). `fixes` may be `["all"]`.
 #[tauri::command]
-async fn preview_fixes(path: String, profile: Option<String>, fixes: Vec<String>) -> Result<FixPreview, String> {
+async fn preview_fixes(path: String, fixes: Vec<String>) -> Result<FixPreview, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let opts = Options { profile, use_kicad: false, ..Default::default() };
-        let p = pcbcheck_core::fixes::preview(Path::new(&path), &opts, &fixes).map_err(|e| format!("{e:#}"))?;
+        let opts = Options { use_kicad: false, ..Default::default() };
+        let p = fabready_core::fixes::preview(Path::new(&path), &opts, &fixes).map_err(|e| format!("{e:#}"))?;
         Ok(FixPreview {
             report: serde_json::to_value(&p.after.report).map_err(|e| e.to_string())?,
             svg: p.after.svg,
@@ -138,28 +135,92 @@ async fn preview_fixes(path: String, profile: Option<String>, fixes: Vec<String>
 
 /// Write previewed fixes (refuses if the board changed since `token`). Returns the backup path etc.
 #[tauri::command]
-async fn apply_fixes(path: String, profile: Option<String>, fixes: Vec<String>, token: String) -> Result<Value, String> {
+async fn apply_fixes(path: String, fixes: Vec<String>, token: String) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let opts = Options { profile, use_kicad: false, ..Default::default() };
-        let applied = pcbcheck_core::fixes::apply(Path::new(&path), &opts, &fixes, Some(&token)).map_err(|e| format!("{e:#}"))?;
+        let opts = Options { use_kicad: false, ..Default::default() };
+        let applied = fabready_core::fixes::apply(Path::new(&path), &opts, &fixes, Some(&token)).map_err(|e| format!("{e:#}"))?;
         serde_json::to_value(applied).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Serialize)]
+struct CheckInfo {
+    id: &'static str,
+    title: &'static str,
+}
+
+#[derive(Serialize)]
+struct ConfigView {
+    /// Where the project's fabready.json lives (or would be created).
+    file: String,
+    exists: bool,
+    /// None when the file can't be read; see `error`.
+    config: Option<Config>,
+    error: Option<String>,
+    /// Built-in profile limits, shown as the defaults the overrides replace.
+    profiles: BTreeMap<String, Rules>,
+    checks: Vec<CheckInfo>,
+    /// Net names on the board, to suggest for power rails.
+    nets: Vec<String>,
+}
+
+/// The project's settings, plus what the settings form needs to explain them.
+#[tauri::command]
+async fn load_config(path: String) -> Result<ConfigView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (pcb, _) = report::resolve(Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+        let file = config::path_for(&pcb);
+        let (config, error) = if !file.exists() {
+            (Some(Config::default()), None)
+        } else {
+            match Config::read(&file) {
+                Ok(c) => {
+                    let invalid = c.validate().err().map(|e| format!("{e:#}"));
+                    (Some(c), invalid)
+                }
+                Err(e) => (None, Some(format!("{e:#}"))),
+            }
+        };
+        let nets: BTreeSet<String> = fabready_core::board::load(&pcb)
+            .map(|b| b.pads().map(|p| p.net.clone()).filter(|n| !n.is_empty()).collect())
+            .unwrap_or_default();
+        Ok(ConfigView {
+            exists: file.exists(),
+            file: file.display().to_string(),
+            config,
+            error,
+            profiles: config::PROFILE_NAMES.iter().filter_map(|n| Some((n.to_string(), config::profile(n)?))).collect(),
+            checks: fabready_core::CATALOG.iter().map(|e| CheckInfo { id: e.0, title: e.1 }).collect(),
+            nets: nets.into_iter().collect(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Write the project's fabready.json (the file watcher then re-checks).
+#[tauri::command]
+fn save_config(path: String, config: Config) -> Result<String, String> {
+    let (pcb, _) = report::resolve(Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+    let file = config::path_for(&pcb);
+    config.save(&file).map_err(|e| format!("{e:#}"))?;
+    Ok(file.display().to_string())
+}
+
 #[tauri::command]
 fn restore_backup(path: String, backup: String) -> Result<(), String> {
-    pcbcheck_core::fixes::restore(Path::new(&path), Path::new(&backup)).map_err(|e| format!("{e:#}"))
+    fabready_core::fixes::restore(Path::new(&path), Path::new(&backup)).map_err(|e| format!("{e:#}"))
 }
 
 /// Last agent that connected over MCP (name + unix time), if any.
 #[tauri::command]
-fn agent_status() -> Option<pcbcheck_core::mcp::AgentSeen> {
-    pcbcheck_core::mcp::last_agent()
+fn agent_status() -> Option<fabready_core::mcp::AgentSeen> {
+    fabready_core::mcp::last_agent()
 }
 
-/// Project passed on the command line (`pcbcheck-app ~/kb/my-board`), if any.
+/// Project passed on the command line (`fabready-app ~/kb/my-board`), if any.
 #[tauri::command]
 fn initial_path() -> Option<String> {
     let arg = std::env::args().skip(1).find(|a| !a.starts_with('-'))?;
@@ -182,8 +243,10 @@ pub fn run() {
             preview_fixes,
             apply_fixes,
             restore_backup,
+            load_config,
+            save_config,
             agent_status
         ])
         .run(tauri::generate_context!())
-        .expect("error while running pcbcheck");
+        .expect("error while running fabready");
 }

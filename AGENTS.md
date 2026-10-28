@@ -1,18 +1,19 @@
 # AGENTS.md
 
-pcbcheck reviews KiCad PCBs before ordering, with extra checks that switch on for keyboard boards
-(see `docs/keyboards.md`). One Rust engine (`crates/pcbcheck-core`) powers the CLI, the MCP server and the
-Tauri desktop app.
+fabready reviews KiCad PCBs before ordering, with extra checks that switch on for keyboard boards
+(see `docs/keyboards.md`). One Rust engine (`crates/fabready-core`) powers the CLI, the MCP server and the
+Tauri desktop app. User docs are in `docs/`: `app.md`, `command-line.md`, `configuration.md`, `parts.md` and
+`keyboards.md`.
 
-## Using pcbcheck on a board
+## Using fabready on a board
 
 Prefer the MCP tools if they are connected (`check_board`, `board_image`, `explain_check`, `review_parts`,
 `list_fixes`, `apply_fix`, `undo_fix`; `get_matrix` only for keyboard firmware work). Otherwise use the CLI:
 
 ```bash
-cargo run -q -p pcbcheck-cli -- check <project-dir|board.kicad_pcb> --json
-cargo run -q -p pcbcheck-cli -- matrix <project> --json
-cargo run -q -p pcbcheck-cli -- explain <check-id>
+cargo run -q -p fabready-cli -- check <project-dir|board.kicad_pcb> --json
+cargo run -q -p fabready-cli -- matrix <project> --json
+cargo run -q -p fabready-cli -- explain <check-id>
 ```
 
 Exit codes: `0` pass/warn, `1` errors (or warnings with `--strict`), `2` could not read the input.
@@ -23,13 +24,14 @@ Exit codes: `0` pass/warn, `1` errors (or warnings with `--strict`), `2` could n
 - Findings with a `fix_id` have an automatic fix: `list_fixes`, then `apply_fix` with `dry_run: true`, then apply.
   Keep the returned backup path so `undo_fix` can restore it. Fix everything else by editing the design; for wiring
   problems, change the schematic first, then update the PCB. Re-run `check_board` after every change.
-- Look at `pcbcheck-out/board.png` (or `board_image`) to sanity-check placement. Marker numbers match finding order.
-- `review_parts` (or `pcbcheck parts`) gives each BOM line its ratings, what the board puts on it, and a verdict.
+- Look at `fabready-out/board.png` (or `board_image`) to sanity-check placement. Marker numbers match finding order.
+- `review_parts` (or `fabready parts`) gives each BOM line its ratings, what the board puts on it, and a verdict.
   For `unknown`/`na` parts, judge from datasheet knowledge and say which conclusions are your own judgement.
 - Edit the user's KiCad files only when asked. Otherwise report findings with their `fix` text.
 - After editing a board that's open in KiCad, tell the user to reload it (File → Revert).
-- Waive deliberate exceptions in `pcbcheck.json` next to the board (`"ignore": ["id", "id:REF", "kb.*"]`),
-  never by changing pcbcheck.
+- Waive deliberate exceptions in `fabready.json` next to the board (`"ignore": ["id", "id:REF", "kb.*"]`),
+  never by changing fabready. The same file holds the fab profile, limit overrides and power rails
+  (see `docs/configuration.md`). The desktop app may have it open in its Settings tab and re-reads it on save.
 - Connectivity and zone checks are approximations. When kicad-cli is installed, its DRC is authoritative.
 
 ## Developing
@@ -38,20 +40,35 @@ Exit codes: `0` pass/warn, `1` errors (or warnings with `--strict`), `2` could n
 cargo test --workspace                     # unit, sample-board and MCP end-to-end tests
 cargo clippy --workspace --all-targets     # keep warning-free
 python3 samples/generate.py                # regenerate sample boards (deterministic)
-cd app && npx tauri dev                    # run the desktop app
+cd app && npm install && npx tauri dev     # run the desktop app
+cd app && npx tauri build --bundles app    # build fabready.app (target/release/bundle/macos/)
 ```
 
-- New checks go in `crates/pcbcheck-core/src/{keyboard,fab,connectivity}.rs`. Register the id in `findings::CATALOG`.
-  Add a planted bug to the buggy variant in `samples/generate.py` and an assertion in `crates/pcbcheck-core/tests/samples.rs`.
-- Automatic fixes live in `crates/pcbcheck-core/src/fixes.rs`: the check attaches `.fixable("<kind>:...")` to its
+| Path | What |
+|---|---|
+| `crates/fabready-core` | Engine: KiCad parser, checks, fixes, parts review, SVG/PNG renderer, report, MCP server, shared viewer (`assets/`) |
+| `crates/fabready-cli` | `fabready` binary |
+| `app/` | Tauri desktop app (`src-tauri/` Rust commands, `ui/` HTML/CSS/JS, no bundler) |
+| `samples/` | Generated boards from `samples/generate.py`: keyboard macropads (clean and buggy) and a sensor board with component problems |
+| `docs/` | User docs. Keep `README.md` short and put details here |
+
+- New checks go in `crates/fabready-core/src/{keyboard,fab,connectivity}.rs`. Register the id in `findings::CATALOG`.
+  Add a planted bug to the buggy variant in `samples/generate.py` and an assertion in `crates/fabready-core/tests/samples.rs`.
+- Automatic fixes live in `crates/fabready-core/src/fixes.rs`: the check attaches `.fixable("<kind>:...")` to its
   finding, and `fixes::plan` turns that id into byte-range edits of the `.kicad_pcb` (S-expression nodes carry
   spans). Only add fixes that need no design judgement, and keep edits surgical so the rest of the file is untouched.
-- Component checks live in `crates/pcbcheck-core/src/parts.rs`: `collect` (ratings + board stress) then `evaluate`
+- Component checks live in `crates/fabready-core/src/parts.rs`: `collect` (ratings + board stress) then `evaluate`
   (findings for under-rated parts, notes for over-spec). Common parts go in `LIBRARY` with typical datasheet values.
-  pcbcheck makes no network requests; don't add calls to unofficial or scraped endpoints (respect vendors' terms).
+  fabready makes no network requests; don't add calls to unofficial or scraped endpoints (respect vendors' terms).
 - License hygiene: dependencies must be under a license listed in `about.toml`; run
   `cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html` before shipping binaries (see `THIRD-PARTY-NOTICES.md`).
-- The board viewer lives in `crates/pcbcheck-core/assets/viewer.{js,css}`. It is embedded into `viewer.html`
+- The board viewer lives in `crates/fabready-core/assets/viewer.{js,css}`. It is embedded into `viewer.html`
   and served to the app through the `viewer_assets` command, so change it in one place only.
 - The app frontend (`app/ui/`) is plain HTML/CSS/JS with no build step. It uses `window.__TAURI__` (`withGlobalTauri`).
   Debug builds embed `app/ui`, so rebuild after editing it unless you're running `tauri dev`.
+- Project settings: `config::Config` is the `fabready.json` schema. `Config::validate` runs on load and save, and
+  `Config::save` keeps unknown keys. The app's Settings tab (`load_config` / `save_config` commands) and Waive
+  button write through it; the app passes no profile override, so the file is the single source of truth.
+  When adding a setting, add it to the Settings form in `app/ui/app.js` and to `docs/configuration.md`.
+- When a change affects users, update the matching page in `docs/`. Keep `README.md` to the overview,
+  quick start, privacy, disclaimer and license.

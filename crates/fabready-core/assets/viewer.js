@@ -1,4 +1,4 @@
-// pcbcheck viewer components, shared by the standalone viewer.html and the desktop app.
+// fabready viewer components, shared by the standalone viewer.html and the desktop app.
 //   PcbViewer.createCanvas(el, {onSelect})  -> interactive board (pan/zoom, layers, markers)
 //   PcbViewer.findingsHtml / matrixHtml / boardHtml(report, ...) -> inspector content
 //   PcbViewer.mount(el, {report, svg})       -> complete standalone viewer
@@ -217,19 +217,20 @@
   function findingRow(f, i, active, opts) {
     const refs = f.refs && f.refs.length ? " · " + f.refs.join(", ") : "";
     const fix = f.fix && f.severity !== "info" ? `<div class="fnd-fix"><b>Fix:</b> ${esc(f.fix)}</div>` : "";
-    const fixable = f.fix_id ? `<span class="fnd-auto" title="pcbcheck can fix this automatically">${WRENCH}</span>` : "";
+    const fixable = f.fix_id ? `<span class="fnd-auto" title="fabready can fix this automatically">${WRENCH}</span>` : "";
     let actions = "";
-    if (opts && opts.actions && f.severity !== "info") {
+    if (opts && opts.actions) {
       actions = '<div class="fnd-actions">' +
         (f.fix_id ? `<button class="fnd-btn primary" data-act="preview-fix" data-fix="${esc(f.fix_id)}">${WRENCH}Preview fix</button>` : "") +
-        `<button class="fnd-btn" data-act="ask-agent" data-idx="${i}">Ask agent</button></div>`;
+        (f.severity !== "info" ? `<button class="fnd-btn" data-act="ask-agent" data-idx="${i}">Ask agent</button>` : "") +
+        `<button class="fnd-btn" data-act="waive" data-idx="${i}" title="Stop reporting this. Saved in fabready.json; undo it in Settings.">Waive</button></div>`;
     }
     return `<li class="fnd${active ? " active" : ""}" data-idx="${i}" style="--sev:var(--${f.severity})">` +
       `<span class="fnd-n">${i + 1}</span><div><div class="fnd-title">${esc(f.title)}${fixable}</div><div class="fnd-msg">${esc(f.message)}</div>` +
       `<div class="fnd-more">${fix}${actions}<div class="fnd-meta">${esc(f.id)}${esc(refs)} · ${esc(f.source)}</div></div></div></li>`;
   }
 
-  /** Findings grouped by severity. `filter` is "all" | "error" | "warning" | "info". `opts.actions` adds fix/agent buttons. */
+  /** Findings grouped by severity. `filter` is "all" | "error" | "warning" | "info". `opts.actions` adds fix/agent/waive buttons. */
   function findingsHtml(r, filter, activeIdx, opts) {
     filter = filter || "all";
     const groups = SEV.filter(([s]) => filter === "all" || filter === s).map(([s, label]) => {
@@ -291,7 +292,7 @@
     return `${+n.toFixed(2)} ${p}${unit}`;
   }
 
-  /** Rated vs what the board puts on the part, for the kinds pcbcheck understands. */
+  /** Rated vs what the board puts on the part, for the kinds fabready understands. */
   function ratingRows(p) {
     const s = p.specs, st = p.stress, src = p.sources || {};
     const assumed = st.voltage_assumed ? " (max)" : "";
@@ -333,7 +334,7 @@
     const stats = `<div class="pcbv-stats"><div class="pcbv-stat"><b class="c-under">${count("under")}</b><span>under-rated</span></div>` +
       `<div class="pcbv-stat"><b class="c-over">${count("over")}</b><span>over-spec</span></div>` +
       `<div class="pcbv-stat"><b>${parts.length}</b><span>part types</span></div></div>`;
-    const source = '<div class="pcbv-note">Ratings come from part values and descriptions, package defaults and a built-in library of common parts. Rails are read from net names (set others in <code>pcbcheck.json</code>).</div>';
+    const source = '<div class="pcbv-note">Ratings come from part values and descriptions, package defaults and a built-in library of common parts. Rails are read from net names (set others in <code>fabready.json</code>).</div>';
     const groups = VERDICTS.map(([v, label]) => {
       const rows = parts.map((p, i) => [p, i]).filter(([p]) => p.verdict === v);
       if (!rows.length) return "";
@@ -404,5 +405,5 @@
     return { canvas };
   }
 
-  window.PcbViewer = { createCanvas, findingsHtml, partsHtml, matrixHtml, boardHtml, mount, esc, basename, plural, WRENCH };
+  window.PcbViewer = { createCanvas, findingsHtml, partsHtml, matrixHtml, boardHtml, mount, esc, basename, plural, WRENCH, RULE_LABELS };
 })();

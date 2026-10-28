@@ -1,4 +1,4 @@
-(kicad_pcb (version 20240108) (generator "pcbcheck_sample") (generator_version "8.0")
+(kicad_pcb (version 20240108) (generator "fabready_sample") (generator_version "8.0")
   (general (thickness 1.6) (legacy_teardrops no))
   (paper "A4")
   (layers

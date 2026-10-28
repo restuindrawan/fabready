@@ -124,7 +124,7 @@ pub fn resolve(path: &Path) -> Result<(PathBuf, Option<PathBuf>)> {
 }
 
 pub fn default_out_dir(pcb: &Path) -> PathBuf {
-    pcb.parent().unwrap_or(Path::new(".")).join("pcbcheck-out")
+    pcb.parent().unwrap_or(Path::new(".")).join("fabready-out")
 }
 
 fn ignored(f: &Finding, ignore: &[String]) -> bool {
@@ -173,7 +173,7 @@ pub fn check_board(board: Board, pcb: &Path, sch: Option<PathBuf>, opts: &Option
         kicad_version: cli.as_ref().map(|c| kicad::version(c)),
     };
     if opts.use_kicad && cli.is_none() {
-        findings.push(Finding::new("kicad.missing", Severity::Info, "kicad-cli not found; ran pcbcheck's built-in checks only."));
+        findings.push(Finding::new("kicad.missing", Severity::Info, "kicad-cli not found; ran fabready's built-in checks only."));
     }
     if let Some(cli) = &cli {
         let out_dir = opts.out_dir.clone().unwrap_or_else(|| default_out_dir(&pcb));
@@ -192,7 +192,7 @@ pub fn check_board(board: Board, pcb: &Path, sch: Option<PathBuf>, opts: &Option
     let svg = render::svg(&board, &findings);
     let fixes = crate::fixes::summarize(&findings);
     let report = Report {
-        tool: "pcbcheck".into(),
+        tool: "fabready".into(),
         version: VERSION.into(),
         board: pcb.display().to_string(),
         schematic: sch.map(|s| s.display().to_string()),
@@ -266,7 +266,7 @@ pub fn markdown(r: &Report) -> String {
     let mut o = String::new();
     let _ = writeln!(
         o,
-        "# pcbcheck: {name}\n\n**Status: {}** · profile `{}` · {} errors · {} warnings · {} infos\n",
+        "# fabready: {name}\n\n**Status: {}** · profile `{}` · {} errors · {} warnings · {} infos\n",
         r.status.to_uppercase(),
         r.profile,
         r.summary.error,

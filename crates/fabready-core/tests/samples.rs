@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use pcbcheck_core::report::{self, Options};
-use pcbcheck_core::Severity;
+use fabready_core::report::{self, Options};
+use fabready_core::Severity;
 
 fn sample(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples").join(name)
 }
 
-fn run(name: &str) -> pcbcheck_core::CheckResult {
+fn run(name: &str) -> fabready_core::CheckResult {
     let opts = Options { use_kicad: false, ..Default::default() };
     report::run(&sample(name), &opts).expect("check runs")
 }
@@ -58,10 +58,10 @@ fn svg_has_layers_and_markers() {
 
 #[test]
 fn ignore_rules_waive_findings() {
-    let dir = std::env::temp_dir().join(format!("pcbcheck-ignore-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("fabready-ignore-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(sample("macropad-buggy/macropad-buggy.kicad_pcb"), dir.join("b.kicad_pcb")).unwrap();
-    std::fs::write(dir.join("pcbcheck.json"), r#"{"ignore": ["fab.*", "kb.missing-diode:SW9"]}"#).unwrap();
+    std::fs::write(dir.join("fabready.json"), r#"{"ignore": ["fab.*", "kb.missing-diode:SW9"]}"#).unwrap();
     let r = report::run(&dir, &Options { use_kicad: false, ..Default::default() }).unwrap().report;
     assert!(!r.findings.iter().any(|f| f.id.starts_with("fab.") || f.id == "kb.missing-diode"));
     assert!(r.findings.iter().any(|f| f.id == "kb.diode-direction-mixed"));
@@ -70,7 +70,7 @@ fn ignore_rules_waive_findings() {
 
 #[test]
 fn non_keyboard_board_gets_no_keyboard_findings() {
-    let dir = std::env::temp_dir().join(format!("pcbcheck-generic-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("fabready-generic-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let pad = |n: &str, x: f64, net: &str| format!(r#"(pad "{n}" thru_hole circle (at {x} 0) (size 1.6 1.6) (drill 0.8) (layers "*.Cu" "*.Mask") {net})"#);
     let board = format!(
@@ -93,8 +93,8 @@ fn non_keyboard_board_gets_no_keyboard_findings() {
 
 #[test]
 fn fixes_preview_apply_and_undo() {
-    use pcbcheck_core::fixes;
-    let dir = std::env::temp_dir().join(format!("pcbcheck-fix-{}", std::process::id()));
+    use fabready_core::fixes;
+    let dir = std::env::temp_dir().join(format!("fabready-fix-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let pcb = dir.join("b.kicad_pcb");
     std::fs::copy(sample("macropad-buggy/macropad-buggy.kicad_pcb"), &pcb).unwrap();
@@ -128,7 +128,7 @@ fn fixes_preview_apply_and_undo() {
     // Untouched findings survive, and the edit is surgical.
     assert!(after.findings.iter().any(|f| f.id == "kb.missing-diode"));
     let new_text = std::fs::read_to_string(&pcb).unwrap();
-    assert!(new_text.contains("(width 0.15)") && new_text.contains("pcbcheck keep-out U1"));
+    assert!(new_text.contains("(width 0.15)") && new_text.contains("fabready keep-out U1"));
     assert_eq!(new_text.lines().count(), original.lines().count() + 29);
 
     fixes::restore(&dir, std::path::Path::new(&applied.backup)).unwrap();
@@ -160,6 +160,6 @@ fn parts_review_catches_misfit_components() {
 #[test]
 fn renders_png() {
     let result = run("macropad");
-    let png = pcbcheck_core::render::png(&result.svg, 800).unwrap();
+    let png = fabready_core::render::png(&result.svg, 800).unwrap();
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
 }

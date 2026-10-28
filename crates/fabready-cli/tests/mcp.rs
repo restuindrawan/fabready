@@ -8,9 +8,9 @@ use serde_json::{json, Value};
 #[test]
 fn mcp_initialize_list_and_call() {
     let board = concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/macropad-buggy");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_pcbcheck"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fabready"))
         .arg("mcp")
-        .env("PCBCHECK_NO_AGENT_RECORD", "1")
+        .env("FABREADY_NO_AGENT_RECORD", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -30,7 +30,7 @@ fn mcp_initialize_list_and_call() {
     send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}));
     let init = recv();
     assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
-    assert_eq!(init["result"]["serverInfo"]["name"], "pcbcheck");
+    assert_eq!(init["result"]["serverInfo"]["name"], "fabready");
 
     send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
     send(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}));

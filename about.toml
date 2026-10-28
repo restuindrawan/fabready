@@ -1,4 +1,4 @@
-# cargo-about configuration: licenses pcbcheck accepts for dependencies.
+# cargo-about configuration: licenses fabready accepts for dependencies.
 # Generate notices with: cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html
 accepted = [
     "MIT",

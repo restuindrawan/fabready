@@ -221,7 +221,7 @@ pub fn plan(text: &str, root: &Sexp, board: &Board, rules: &Rules, id: &str) -> 
                  \t\t(fill\n\t\t\t(thermal_gap 0.5)\n\t\t\t(thermal_bridge_width 0.5)\n\t\t)\n\
                  \t\t(polygon\n\t\t\t(pts\n\t\t\t\t{xy}\n\t\t\t)\n\t\t)\n\t)\n",
                 uuid_for(id),
-                sexpr::quote(&format!("pcbcheck keep-out {reference}"))
+                sexpr::quote(&format!("fabready keep-out {reference}"))
             );
             // Insert just before the board's closing parenthesis.
             let end = root.span().end - 1;
@@ -367,7 +367,7 @@ pub struct Applied {
     pub after: Summary,
 }
 
-/// Write the fixes. A copy of the original goes to `pcbcheck-out/backups/` first.
+/// Write the fixes. A copy of the original goes to `fabready-out/backups/` first.
 /// Pass the preview's `token` to refuse writing if the file changed since it was previewed.
 pub fn apply(path: &Path, opts: &Options, ids: &[String], expect_token: Option<&str>) -> Result<Applied> {
     let p = plan_all(path, opts, ids)?;
@@ -403,7 +403,7 @@ pub fn restore(path: &Path, backup: &Path) -> Result<()> {
     let backups = report::default_out_dir(&pcb).join("backups");
     let backup = std::fs::canonicalize(backup).with_context(|| format!("backup {} not found", backup.display()))?;
     if !backup.starts_with(std::fs::canonicalize(&backups).unwrap_or(backups)) {
-        bail!("refusing to restore from outside pcbcheck-out/backups");
+        bail!("refusing to restore from outside fabready-out/backups");
     }
     let text = std::fs::read_to_string(&backup)?;
     sexpr::parse(&text).context("backup is not a readable board")?;

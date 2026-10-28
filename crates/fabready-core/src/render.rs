@@ -198,7 +198,7 @@ pub fn viewer_html(title: &str, data_json: &str) -> String {
     // Prevent "</script>" inside the data from closing the script tag.
     let data = data_json.replace("</", "<\\/");
     format!(
-        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>pcbcheck · {}</title>\n\
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>fabready · {}</title>\n\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<style>{VIEWER_CSS}</style></head>\n\
          <body class=\"standalone\"><div id=\"viewer\"></div>\n<script>{VIEWER_JS}</script>\n\
          <script>PcbViewer.mount(document.getElementById('viewer'), {data});</script>\n</body></html>\n",

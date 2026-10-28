@@ -1,4 +1,4 @@
-//! Minimal MCP server over stdio (newline-delimited JSON-RPC 2.0), exposing pcbcheck as agent tools.
+//! Minimal MCP server over stdio (newline-delimited JSON-RPC 2.0), exposing fabready as agent tools.
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 const SUPPORTED: &[&str] = &["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "pcbcheck reviews KiCad PCBs before ordering. Call check_board with a project \
+const INSTRUCTIONS: &str = "fabready reviews KiCad PCBs before ordering. Call check_board with a project \
 directory or .kicad_pcb path. Fix errors first, then warnings; info findings are context. Findings with a fix_id can \
 be fixed automatically: call list_fixes, apply_fix with dry_run to preview, then apply_fix (undo_fix restores the \
 backup). Everything else needs a real design edit; prefer changing the schematic for wiring problems, then update the \
@@ -28,13 +28,13 @@ fn tools() -> Value {
         {
             "name": "check_board",
             "title": "Check KiCad PCB",
-            "description": "Run all pcbcheck checks (routing completeness, fab rules, board outline, keyboard checks when switches are present, \
-plus KiCad DRC/ERC when kicad-cli is installed). Writes report.json, report.md, viewer.html and board.png to <project>/pcbcheck-out and returns the report.",
+            "description": "Run all fabready checks (routing completeness, fab rules, board outline, keyboard checks when switches are present, \
+plus KiCad DRC/ERC when kicad-cli is installed). Writes report.json, report.md, viewer.html and board.png to <project>/fabready-out and returns the report.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": path,
-                    "profile": {"type": "string", "enum": ["jlcpcb", "safe"], "description": "Fab rules profile (default jlcpcb or pcbcheck.json)."},
+                    "profile": {"type": "string", "enum": ["jlcpcb", "safe"], "description": "Fab rules profile (default jlcpcb or fabready.json)."},
                     "use_kicad": {"type": "boolean", "description": "Run kicad-cli DRC/ERC if installed (default true)."}
                 },
                 "required": ["path"]
@@ -62,7 +62,7 @@ plus KiCad DRC/ERC when kicad-cli is installed). Writes report.json, report.md, 
         {
             "name": "explain_check",
             "title": "Explain a check",
-            "description": "Why a pcbcheck finding id matters and how to fix it. Omit id to list every check.",
+            "description": "Why a fabready finding id matters and how to fix it. Omit id to list every check.",
             "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Finding id, e.g. conn.unrouted"}}},
             "annotations": {"readOnlyHint": true}
         },
@@ -86,7 +86,7 @@ components fit the board's job; fill gaps for unknown parts from your own datash
         {
             "name": "list_fixes",
             "title": "List automatic fixes",
-            "description": "Fixes pcbcheck can apply by itself (track widths, via sizes, antenna keep-outs), each with the findings it resolves. \
+            "description": "Fixes fabready can apply by itself (track widths, via sizes, antenna keep-outs), each with the findings it resolves. \
 Anything not listed needs a real design edit by you or the user.",
             "inputSchema": {"type": "object", "properties": {"path": path, "profile": {"type": "string", "enum": ["jlcpcb", "safe"]}}, "required": ["path"]},
             "annotations": {"readOnlyHint": true}
@@ -95,7 +95,7 @@ Anything not listed needs a real design edit by you or the user.",
             "name": "apply_fix",
             "title": "Apply automatic fixes",
             "description": "Apply fixes from list_fixes to the .kicad_pcb. Pass fix ids, or [\"all\"]. Use dry_run first to see what changes and \
-the error count before/after. A backup is saved to pcbcheck-out/backups and returned so the change can be undone with undo_fix. \
+the error count before/after. A backup is saved to fabready-out/backups and returned so the change can be undone with undo_fix. \
 Tell the user to reload the board in KiCad (File > Revert) if it is open.",
             "inputSchema": {
                 "type": "object",
@@ -123,7 +123,7 @@ fn server_info(version: &str) -> Value {
     json!({
         "protocolVersion": version,
         "capabilities": {"tools": {"listChanged": false}},
-        "serverInfo": {"name": "pcbcheck", "title": "pcbcheck", "version": report::VERSION},
+        "serverInfo": {"name": "fabready", "title": "fabready", "version": report::VERSION},
         "instructions": INSTRUCTIONS
     })
 }
@@ -291,7 +291,7 @@ pub struct AgentSeen {
 
 fn agents_file() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".pcbcheck").join("agent.json"))
+    Some(PathBuf::from(home).join(".fabready").join("agent.json"))
 }
 
 fn record_agent(params: &Value) {
@@ -322,7 +322,7 @@ pub fn handle(msg: &Value) -> Option<Value> {
         "initialize" => {
             let requested = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(SUPPORTED[1]);
             let version = if SUPPORTED.contains(&requested) { requested } else { SUPPORTED[1] };
-            if std::env::var_os("PCBCHECK_NO_AGENT_RECORD").is_none() {
+            if std::env::var_os("FABREADY_NO_AGENT_RECORD").is_none() {
                 record_agent(&params);
             }
             Ok(server_info(version))

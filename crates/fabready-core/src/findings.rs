@@ -1,4 +1,4 @@
-//! Finding model and the catalog of every check pcbcheck can report.
+//! Finding model and the catalog of every check fabready can report.
 
 use serde::{Deserialize, Serialize};
 
@@ -46,8 +46,8 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
      "The matrix needs more row+column lines than the controller has I/O pins.",
      "Rearrange the matrix (closer to square), or use a controller with more pins."),
     ("kb.no-controller", "No controller module found",
-     "pcbcheck could not find an MCU module footprint (nice!nano, XIAO, Pro Micro, ...).",
-     "Add the controller footprint, or set keyboard.controller_regex in pcbcheck.json."),
+     "fabready could not find an MCU module footprint (nice!nano, XIAO, Pro Micro, ...).",
+     "Add the controller footprint, or set keyboard.controller_regex in fabready.json."),
     ("kb.switch-overlap", "Key switches are too close together",
      "Keycaps will collide if switches are closer than the key pitch.",
      "Space switch centres at least 19.05 mm apart (MX) or 18 mm x 17 mm (Choc)."),
@@ -76,7 +76,7 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
      "None of its pads are connected; usually the PCB was not updated from the schematic.",
      "In the PCB editor run Tools > Update PCB from Schematic (F8)."),
     ("conn.zone-approx", "Zone connectivity is approximate",
-     "pcbcheck treats zone outlines as filled copper; real fills can be broken up by tracks.",
+     "fabready treats zone outlines as filled copper; real fills can be broken up by tracks.",
      "Install KiCad so `kicad-cli pcb drc` can verify zone fills."),
     ("fab.track-too-thin", "Track is thinner than the fab allows",
      "The factory cannot reliably make tracks this thin.", "Increase the track width."),
@@ -141,7 +141,7 @@ pub struct Finding {
     pub refs: Vec<String>,
     pub at: Option<At>,
     pub source: String,
-    /// Set when pcbcheck can fix this automatically (see `fixes`). Shared by findings one fix resolves.
+    /// Set when fabready can fix this automatically (see `fixes`). Shared by findings one fix resolves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fix_id: Option<String>,
 }
@@ -166,7 +166,7 @@ impl Finding {
             fix,
             refs: Vec::new(),
             at: None,
-            source: "pcbcheck".into(),
+            source: "fabready".into(),
             fix_id: None,
         }
     }

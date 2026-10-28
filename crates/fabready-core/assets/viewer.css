@@ -1,4 +1,4 @@
-/* pcbcheck shared design tokens + board viewer components (used by viewer.html and the desktop app). */
+/* fabready shared design tokens + board viewer components (used by viewer.html and the desktop app). */
 :root{
   color-scheme:light dark;
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",system-ui,sans-serif;

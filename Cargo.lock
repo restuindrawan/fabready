@@ -886,6 +886,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabready-app"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "fabready-core",
+ "notify-debouncer-mini",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "fabready-cli"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fabready-core",
+ "serde_json",
+]
+
+[[package]]
+name = "fabready-core"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "regex",
+ "resvg",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2481,42 +2517,6 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
-]
-
-[[package]]
-name = "pcbcheck-app"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "notify-debouncer-mini",
- "pcbcheck-core",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
-]
-
-[[package]]
-name = "pcbcheck-cli"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "clap",
- "pcbcheck-core",
- "serde_json",
-]
-
-[[package]]
-name = "pcbcheck-core"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "regex",
- "resvg",
- "serde",
- "serde_json",
 ]
 
 [[package]]

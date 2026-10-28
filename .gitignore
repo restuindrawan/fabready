@@ -1,6 +1,6 @@
 /target
 node_modules/
-pcbcheck-out/
+fabready-out/
 __pycache__/
 app/src-tauri/gen/
 THIRD_PARTY_LICENSES.html

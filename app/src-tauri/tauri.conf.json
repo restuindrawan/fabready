@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pcbcheck",
+  "productName": "fabready",
   "version": "0.2.0",
-  "identifier": "io.github.restuindrawan.pcbcheck",
+  "identifier": "io.github.restuindrawan.fabready",
   "build": {
     "frontendDist": "../ui"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "pcbcheck",
+        "title": "fabready",
         "width": 1360,
         "height": 860,
         "minWidth": 900,

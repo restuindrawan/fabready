@@ -1,4 +1,4 @@
-"""Generate sample 3x3 nice!nano macropad boards (KiCad 8 format) for trying pcbcheck.
+"""Generate sample 3x3 nice!nano macropad boards (KiCad 8 format) for trying fabready.
 
     python3 samples/generate.py
 
@@ -108,7 +108,7 @@ class Pcb:
 
     def text(self) -> str:
         nets = "\n".join(f'  (net {i} "{n}")' for i, n in enumerate(self.nets))
-        return (f'(kicad_pcb (version 20240108) (generator "pcbcheck_sample") (generator_version "8.0")\n'
+        return (f'(kicad_pcb (version 20240108) (generator "fabready_sample") (generator_version "8.0")\n'
                 f'  (general (thickness 1.6) (legacy_teardrops no))\n  (paper "A4")\n{LAYERS}\n'
                 f'  (setup (pad_to_mask_clearance 0))\n{nets}\n' + "\n".join(self.items) + "\n)\n")
 
@@ -128,7 +128,7 @@ def build(name: str, buggy: bool) -> str:
         nets_by_pin[str(i + 1)] = f"ROW{r}"
     nets_by_pin.update({"24": "RAW", "23": "GND", "3": "GND", "4": "GND"})
     pads = [(n, k, s, x, y, w, h, d, nets_by_pin.get(n, ""), f) for n, k, s, x, y, w, h, d, _, f in pads]
-    b.footprint("U1", "nice!nano", "pcbcheck_samples:nice_nano", MOD_X, MOD_Y, pads, (-9, -16.5, 9, 16.5))
+    b.footprint("U1", "nice!nano", "fabready_samples:nice_nano", MOD_X, MOD_Y, pads, (-9, -16.5, 9, 16.5))
 
     # Switches + diodes
     n = 0
@@ -138,7 +138,7 @@ def build(name: str, buggy: bool) -> str:
             junction = f"Net-(D{n}-A)"
             no_diode = buggy and n == 9
             sw_pad2_net = f"ROW{r}" if no_diode else junction
-            b.footprint(f"SW{n}", "SW_Push", "pcbcheck_samples:SW_MX_1u", kx, ky, [
+            b.footprint(f"SW{n}", "SW_Push", "fabready_samples:SW_MX_1u", kx, ky, [
                 ("1", "thru_hole", "circle", -3.81, -2.54, 2.2, 2.2, 1.5, f"COL{c}", "1"),
                 ("2", "thru_hole", "circle", 2.54, -5.08, 2.2, 2.2, 1.5, sw_pad2_net, "2"),
                 ("", "np_thru_hole", "circle", 0, 0, 4, 4, 4, "", ""),
@@ -172,11 +172,11 @@ def build(name: str, buggy: bool) -> str:
         b.track(f"COL{c}", "F.Cu", (x, KY[0] - 2.54), (x, lane_y), (lane_x, lane_y), (lane_x, pin_y), (LEFT_X, pin_y))
 
     # Battery connector, power switch, mounting holes
-    b.footprint("J1", "Battery", "pcbcheck_samples:JST_PH_2pin", 176, 150, [
+    b.footprint("J1", "Battery", "fabready_samples:JST_PH_2pin", 176, 150, [
         ("1", "thru_hole", "circle", -1, 0, 1.4, 1.4, 0.8, "BAT+", "+"),
         ("2", "thru_hole", "circle", 1, 0, 1.4, 1.4, 0.8, "GND", "-"),
     ], (-3, -2.5, 3, 2.5))
-    b.footprint("SW10", "Power", "pcbcheck_samples:SW_Slide_SPDT", 176, 142, [
+    b.footprint("SW10", "Power", "fabready_samples:SW_Slide_SPDT", 176, 142, [
         ("1", "thru_hole", "circle", -1.5, 0, 1.2, 1.2, 0.7, "RAW", ""),
         ("2", "thru_hole", "circle", 0, 0, 1.2, 1.2, 0.7, "BAT+", ""),
         ("3", "thru_hole", "circle", 1.5, 0, 1.2, 1.2, 0.7, "", ""),
@@ -257,7 +257,7 @@ def main() -> None:
     (d / "sensor-board.kicad_pcb").write_text(build_sensor())
     (d / "sensor-board.kicad_pro").write_text(json.dumps({"meta": {"filename": "sensor-board.kicad_pro", "version": 1}}, indent=2) + "\n")
     # The sample is about components, so routing findings are waived; the 3.3 V load sizes the regulator.
-    (d / "pcbcheck.json").write_text(json.dumps({"power": {"current_ma": {"+3V3": 30}}, "ignore": ["conn.*"]}, indent=2) + "\n")
+    (d / "fabready.json").write_text(json.dumps({"power": {"current_ma": {"+3V3": 30}}, "ignore": ["conn.*"]}, indent=2) + "\n")
     print(f"wrote {d / 'sensor-board.kicad_pcb'}")
 
 

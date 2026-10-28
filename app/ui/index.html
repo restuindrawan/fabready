@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>pcbcheck</title>
+  <title>fabready</title>
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -32,18 +32,18 @@
       <header class="mh" data-tauri-drag-region>
         <button class="icon-btn" id="show-sidebar" title="Show sidebar (⌘B)" aria-label="Show sidebar"></button>
         <div class="mh-title" data-tauri-drag-region>
-          <span class="mh-name" id="project-name">pcbcheck</span>
+          <span class="mh-name" id="project-name">fabready</span>
           <span class="mh-path" id="project-path" data-tauri-drag-region></span>
         </div>
         <div class="mh-actions">
-          <label class="select" id="profile-field" hidden title="Fab capability profile">
+          <label class="select" id="profile-field" hidden title="Fab capability profile (saved in fabready.json)">
             <select id="profile" aria-label="Fab profile">
               <option value="jlcpcb">JLCPCB</option>
               <option value="safe">Safe (any fab)</option>
             </select>
           </label>
           <button class="icon-btn" id="recheck" hidden title="Re-check (⌘R)" aria-label="Re-check"><span class="ico" data-icon="refresh"></span></button>
-          <button class="icon-btn" id="export" hidden title="Export report, viewer and images to pcbcheck-out/" aria-label="Export report"><span class="ico" data-icon="download"></span></button>
+          <button class="icon-btn" id="export" hidden title="Export report, viewer and images to fabready-out/" aria-label="Export report"><span class="ico" data-icon="download"></span></button>
           <button class="icon-btn" id="toggle-inspector" hidden title="Toggle inspector (⌘I)" aria-label="Toggle inspector"></button>
         </div>
       </header>
@@ -61,7 +61,7 @@
           <div class="welcome-card" id="drop">
             <div class="welcome-mark" aria-hidden="true"></div>
             <h1>Check a PCB before you order it</h1>
-            <p>Open a KiCad project folder or drop it here. pcbcheck checks routing, fab limits and the board outline,
+            <p>Open a KiCad project folder or drop it here. fabready checks routing, fab limits and the board outline,
               plus extra checks for keyboards, then re-checks every time you save in KiCad.</p>
             <button class="btn primary" id="open-empty">Open project…</button>
           </div>
@@ -79,6 +79,7 @@
           <button role="tab" data-tab="findings" aria-selected="true">Findings</button>
           <button role="tab" data-tab="parts" aria-selected="false">Parts</button>
           <button role="tab" data-tab="board" aria-selected="false">Board</button>
+          <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
         </div>
       </div>
       <div class="filters" id="filters" role="group" aria-label="Filter findings"></div>
@@ -88,7 +89,7 @@
 
   <dialog id="agents-dialog">
     <h2>Connect AI agents</h2>
-    <p>This app is also an MCP server. Connected agents can check the board, see it, apply pcbcheck's automatic
+    <p>This app is also an MCP server. Connected agents can check the board, see it, apply fabready's automatic
       fixes (<code>list_fixes</code>, <code>apply_fix</code>) and fix the rest by editing your KiCad files, while the app
       re-checks after every save. Each finding's <b>Ask agent</b> button copies a ready-made prompt.</p>
     <h3>Claude Code</h3>

@@ -1,12 +1,12 @@
 # Third-party notices
 
-pcbcheck is MIT-licensed (see `LICENSE`). It depends on open-source Rust crates, all under permissive
+fabready is MIT-licensed (see `LICENSE`). It depends on open-source Rust crates, all under permissive
 licenses (MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, Unlicense, 0BSD), plus a
 few under the Mozilla Public License 2.0.
 
 ## MPL-2.0 components
 
-These come in only through Tauri, so they're in the desktop app but not the `pcbcheck` CLI. pcbcheck
+These come in only through Tauri, so they're in the desktop app but not the `fabready` CLI. fabready
 uses them unmodified. Their source code is available from crates.io and the links below.
 
 | Crate | Source |
@@ -39,9 +39,9 @@ isn't included in it.
 ## Trademarks and data
 
 KiCad, JLCPCB, LCSC, nice!nano, Seeed XIAO, Cherry MX, Kailh, ZMK, QMK and other product names are
-trademarks of their respective owners. They're mentioned only to describe compatibility. pcbcheck isn't
+trademarks of their respective owners. They're mentioned only to describe compatibility. fabready isn't
 affiliated with or endorsed by any of them.
 
-pcbcheck makes no network requests. The fab capability profiles and the built-in part ratings are
+fabready makes no network requests. The fab capability profiles and the built-in part ratings are
 typical values written from public datasheets and capability pages. They aren't copies of anyone's
 database, and they can be out of date, so always confirm with your manufacturer and the part's datasheet.

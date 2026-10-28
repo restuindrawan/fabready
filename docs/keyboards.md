@@ -1,6 +1,6 @@
 # Keyboard PCBs
 
-pcbcheck switches on extra checks when it finds key switch footprints on a board. Boards without key switches
+fabready switches on extra checks when it finds key switch footprints on a board. Boards without key switches
 never see these findings.
 
 ## What gets checked
@@ -23,7 +23,7 @@ never see these findings.
 | `kb.no-reset-button` | info | Controller RST pin not wired to a button |
 | `kb.matrix-summary` | info | Key count, matrix size, diode direction and GPIO usage |
 
-Run `pcbcheck explain <id>` for the reasoning and fix behind each one.
+Run `fabready explain <id>` for the reasoning and fix behind each one.
 
 ## How boards are recognised
 
@@ -33,10 +33,11 @@ Run `pcbcheck explain <id>` for the reasoning and fix behind each one.
   pin function `K`, or pad 1 (KiCad's convention).
 - **Controller:** footprint or value matching nice!nano, XIAO, Pro Micro, nRF52, E73, Holyiot, MDBT, RP2040,
   Pico, Elite-C, ESP32 and similar. Wireless modules also get the antenna, battery and power-switch checks.
-- **Rows vs columns:** net names containing `ROW`/`COL` let pcbcheck name the firmware diode direction
+- **Rows vs columns:** net names containing `ROW`/`COL` let fabready name the firmware diode direction
   (`col2row` or `row2col`).
 
-If your footprints use other names, override the patterns in `pcbcheck.json`:
+If your footprints use other names, override the patterns in `fabready.json` (or in the app's Settings tab;
+see [configuration.md](configuration.md#keyboard)):
 
 ```json
 {
@@ -56,8 +57,8 @@ If your footprints use other names, override the patterns in `pcbcheck.json`:
 Run these when you're writing ZMK or QMK config, not as part of every check:
 
 ```bash
-pcbcheck matrix path/to/project          # grid of keys, diode direction, controller pin per row/column
-pcbcheck matrix path/to/project --json
+fabready matrix path/to/project          # grid of keys, diode direction, controller pin per row/column
+fabready matrix path/to/project --json
 ```
 
 Agents get the same data from the `get_matrix` MCP tool: keys, row/column nets, the controller pin for

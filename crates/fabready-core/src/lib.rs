@@ -1,6 +1,6 @@
-//! pcbcheck: pre-order checks for KiCad PCBs, with extra checks for keyboards.
+//! fabready: pre-order checks for KiCad PCBs, with extra checks for keyboards.
 //!
-//! The same engine powers the `pcbcheck` CLI, its MCP server, and the desktop app.
+//! The same engine powers the `fabready` CLI, its MCP server, and the desktop app.
 
 pub mod board;
 pub mod config;

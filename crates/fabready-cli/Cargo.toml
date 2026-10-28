@@ -1,17 +1,18 @@
 [package]
-name = "pcbcheck-cli"
-description = "pcbcheck command-line tool and MCP server"
+name = "fabready-cli"
+description = "fabready command-line tool and MCP server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
 
 [[bin]]
-name = "pcbcheck"
+name = "fabready"
 path = "src/main.rs"
 
 [dependencies]
-pcbcheck-core.workspace = true
+fabready-core.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 clap = { version = "4", features = ["derive"] }
