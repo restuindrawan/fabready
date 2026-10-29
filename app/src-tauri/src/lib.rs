@@ -10,6 +10,7 @@ use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventR
 use fabready_core::config::{self, Config, Rules};
 use fabready_core::report::{self, default_out_dir, Options};
 use fabready_core::render::{VIEWER_CSS, VIEWER_JS};
+use fabready_core::scaffold::{self, NewProject};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -288,6 +289,77 @@ fn initial_path() -> Option<String> {
     std::fs::canonicalize(arg).ok().map(|p| p.display().to_string())
 }
 
+/// Where "New board" suggests creating projects: ~/Documents/KiCad when it exists, otherwise ~/Documents.
+#[tauri::command]
+fn default_project_dir(app: AppHandle) -> Option<String> {
+    let docs = app.path().document_dir().or_else(|_| app.path().home_dir()).ok()?;
+    let kicad = docs.join("KiCad");
+    Some(if kicad.is_dir() { kicad } else { docs }.display().to_string())
+}
+
+/// Create a new KiCad project in `parent` (see `fabready_core::scaffold`). Returns its folder.
+#[tauri::command]
+async fn create_project(parent: String, project: NewProject) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scaffold::create(Path::new(&parent), &project).map(|d| d.display().to_string()).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The boards in `samples/` (see samples/generate.py), so "Try a sample" works without the source tree.
+const SAMPLES: &[(&str, &[(&str, &str)])] = &[
+    ("macropad-buggy", &[
+        ("macropad-buggy.kicad_pcb", include_str!("../../../samples/macropad-buggy/macropad-buggy.kicad_pcb")),
+        ("macropad-buggy.kicad_pro", include_str!("../../../samples/macropad-buggy/macropad-buggy.kicad_pro")),
+    ]),
+    ("sensor-board", &[
+        ("sensor-board.kicad_pcb", include_str!("../../../samples/sensor-board/sensor-board.kicad_pcb")),
+        ("sensor-board.kicad_pro", include_str!("../../../samples/sensor-board/sensor-board.kicad_pro")),
+        ("fabready.json", include_str!("../../../samples/sensor-board/fabready.json")),
+    ]),
+    ("macropad", &[
+        ("macropad.kicad_pcb", include_str!("../../../samples/macropad/macropad.kicad_pcb")),
+        ("macropad.kicad_pro", include_str!("../../../samples/macropad/macropad.kicad_pro")),
+    ]),
+];
+
+/// Write a fresh copy of a sample to the app's data folder (replacing any earlier copy). Returns its folder.
+#[tauri::command]
+fn open_sample(app: AppHandle, name: String) -> Result<String, String> {
+    let (_, files) = SAMPLES.iter().find(|(n, _)| *n == name).ok_or_else(|| format!("unknown sample '{name}'"))?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("samples").join(&name);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("clearing {}: {e}", dir.display()))?;
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    for (file, text) in files.iter() {
+        std::fs::write(dir.join(file), text).map_err(|e| format!("writing {file}: {e}"))?;
+    }
+    Ok(dir.display().to_string())
+}
+
+/// Open the project (its .kicad_pro, or the board when there is none) in KiCad.
+#[tauri::command]
+fn open_in_kicad(path: String) -> Result<(), String> {
+    let (pcb, _) = report::resolve(Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+    let pro = pcb.with_extension("kicad_pro");
+    let target = if pro.exists() { pro } else { pcb };
+    let missing = "Couldn't start KiCad. Install it from kicad.org (on a Mac: brew install --cask kicad), then try again.";
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("open").arg("-a").arg("KiCad").arg(&target).output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(missing.into());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd").args(["/C", "start", ""]).arg(&target).spawn().map_err(|_| missing.to_string())?;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    std::process::Command::new("kicad").arg(&target).spawn().map_err(|_| missing.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -306,6 +378,10 @@ pub fn run() {
             unwatch,
             mcp_command,
             initial_path,
+            default_project_dir,
+            create_project,
+            open_sample,
+            open_in_kicad,
             preview_fixes,
             apply_fixes,
             inspect_items,

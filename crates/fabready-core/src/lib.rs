@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod parts;
 pub mod render;
 pub mod report;
+pub mod scaffold;
 pub mod sexpr;
 
 pub use findings::{Finding, Severity, CATALOG};

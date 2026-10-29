@@ -287,14 +287,22 @@ window.FabreadyChat = function createChat(d) {
     if (!chat) return;
     const a = agents.find((x) => x.id === chat.agent) || {};
     const status = !listed ? "Looking for agents…" : a.ready ? esc(a.note) : `<span class="bad">${esc(a.note || "Not available")}</span>`;
-    empty.innerHTML = `<div class="ag-empty-t">Ask ${esc(nameOf(chat.agent))} about this board</div>` +
-      "<p>It sees the project and the finding you've selected, points at parts on the board, and proposes fixes for you to " +
-      "review. File edits and commands ask for your approval here.</p>" +
-      `<div class="ag-suggest">${SUGGESTIONS.map((s) => `<button class="chip" data-act="suggest">${esc(s)}</button>`).join("")}</div>` +
+    // A board with no parts yet (just created) needs planning, not fixing.
+    const r = d.state().payload && d.state().payload.report;
+    const fresh = !!r && !r.parts.length && !r.stats.tracks;
+    empty.innerHTML = (fresh
+      ? `<div class="ag-empty-t">Plan this board with ${esc(nameOf(chat.agent))}</div>` +
+        "<p>Describe what you're building. It can suggest parts with their KiCad symbols and footprints, outline the schematic and " +
+        "walk you through the layout, then check the board as you go. File edits and commands ask for your approval here.</p>"
+      : `<div class="ag-empty-t">Ask ${esc(nameOf(chat.agent))} about this board</div>` +
+        "<p>It sees the project and the finding you've selected, points at parts on the board, and proposes fixes for you to " +
+        "review. File edits and commands ask for your approval here.</p>") +
+      `<div class="ag-suggest">${(fresh ? NEW_SUGGESTIONS : SUGGESTIONS).map((s) => `<button class="chip" data-act="suggest">${esc(s)}</button>`).join("")}</div>` +
       `<div class="ag-empty-m">${status}</div>` +
       '<div class="ag-empty-m">Prefer your own terminal or editor? <button class="link" data-act="mcp">Connect it over MCP</button></div>';
   }
   const SUGGESTIONS = ["What should I fix first?", "Fix the errors", "Are the parts right for this board?", "Is it ready to order?"];
+  const NEW_SUGGESTIONS = ["Help me plan this board", "Which parts do I need?", "How do I start in KiCad?"];
 
   function renderStatus() {
     const chat = current();
@@ -705,6 +713,19 @@ window.FabreadyChat = function createChat(d) {
       if (current()) { renderChips(); renderStatus(); }
     },
     focus() {
+      text.focus();
+    },
+    /** Open a conversation with a prepared message: send it when the agent is ready, otherwise leave it in the composer. */
+    begin(msg) {
+      const chat = current();
+      if (!chat) return;
+      const a = agents.find((x) => x.id === chat.agent);
+      if (listed && a && a.ready && !chat.working) {
+        send(msg, chat);
+        return;
+      }
+      chat.draft = msg;
+      rebuild();
       text.focus();
     },
     /** "Ask agent" on findings: attach them and suggest a message. */

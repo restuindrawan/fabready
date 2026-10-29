@@ -31,7 +31,8 @@ cd app && npm install
 npx tauri build --bundles app      # fabready.app in target/release/bundle/macos/
 ```
 
-Open a KiCad project folder, or drop it on the window. The app re-checks every time you save in KiCad. You
+Open a KiCad project folder, or drop it on the window. No design yet? Start a new board (the app creates the
+KiCad project) or try a sample. The app re-checks every time you save in KiCad. You
 can view the board layer by layer, edit it Figma-style (move footprints, route tracks, place vias, measure,
 undo), and chat with Claude Code, Codex or OpenCode about the board you have open.
 

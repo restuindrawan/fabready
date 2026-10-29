@@ -50,6 +50,7 @@
     minus: '<path d="M3.5 8h9"/>',
     plus: '<path d="M3.5 8h9M8 3.5v9"/>',
     layers: '<path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.2 8 11.2 14 8.2M2 10.9 8 13.9 14 10.9"/>',
+    external: '<path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/>',
   };
   const icon = (name) =>
     `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
@@ -278,7 +279,7 @@
     app.dataset.state = "ready";
     $("welcome").hidden = true;
     $("canvas").hidden = false;
-    for (const id of ["profile-field", "recheck", "export", "toggle-inspector"]) $(id).hidden = false;
+    for (const id of ["profile-field", "recheck", "open-kicad", "export", "toggle-inspector"]) $(id).hidden = false;
     $("profile").value = payload.report.profile;
     canvas.update(payload.svg, payload.report.board);
     if (state.active != null && !payload.report.findings[state.active]) state.active = null;
@@ -358,6 +359,159 @@
   async function pickProject() {
     const picked = await invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Open KiCad project folder" } });
     if (picked) openProject(picked);
+  }
+
+  // ------------------------------------------------------------ onboarding (welcome screen, new board, samples)
+  function welcomeStep(step) {
+    $("onb-start").hidden = step !== "start";
+    $("onb-samples").hidden = step !== "samples";
+    const first = step === "samples" ? document.querySelector("[data-sample]") : $("drop");
+    if (first) first.focus();
+  }
+
+  async function openSample(name, row) {
+    if (row) row.setAttribute("aria-busy", "true");
+    try {
+      await openProject(await invoke("open_sample", { name }));
+    } catch (e) {
+      toast(String(e), "error");
+    } finally {
+      if (row) row.removeAttribute("aria-busy");
+    }
+  }
+
+  async function openInKicad() {
+    if (!state.path) return;
+    try {
+      await invoke("open_in_kicad", { path: state.path });
+    } catch (e) {
+      toast(String(e), "error");
+    }
+  }
+
+  const SWITCH_PITCH = { mx: [19.05, 19.05], choc: [18, 17] };
+  // Keyboard boards: this much board around the keys, plus room above them for the controller.
+  const KB_MARGIN = 8, KB_CONTROLLER = 20;
+  const nf = (id) => $("nf-" + id);
+  const radio = (name) => (document.querySelector(`input[name="nf-${name}"]:checked`) || {}).value;
+  const round2 = (v) => String(Math.round(v * 100) / 100);
+  const num = (id) => Number(nf(id).value.trim().replace(",", "."));
+
+  function newBoardSize() {
+    if (radio("kind") !== "keyboard") return;
+    const [px, py] = SWITCH_PITCH[radio("switch")];
+    const cols = Math.round(num("cols")), rows = Math.round(num("rows"));
+    if (!(cols > 0 && rows > 0)) return;
+    nf("w").value = round2(cols * px + 2 * KB_MARGIN);
+    nf("h").value = round2(rows * py + 2 * KB_MARGIN + KB_CONTROLLER);
+  }
+
+  function newBoardPath() {
+    const where = nf("where").value.trim().replace(/[\\/]+$/, "");
+    const name = nf("name").value.trim();
+    nf("path").textContent = where && name ? `Creates ${where}/${name}/` : "";
+  }
+
+  /** One-line summary for the collapsed Board row. */
+  function newBoardSummary() {
+    const size = `${nf("w").value.trim() || "?"} × ${nf("h").value.trim() || "?"} mm`;
+    const kb = radio("kind") === "keyboard"
+      ? `${nf("cols").value.trim() || "?"} × ${nf("rows").value.trim() || "?"} keys, ${radio("switch") === "choc" ? "Choc" : "MX-style"} · ` : "";
+    nf("sum").textContent = kb + size;
+  }
+
+  async function newBoard() {
+    const dlg = $("new-dialog");
+    if (dlg.open) return;
+    if (!nf("where").value.trim()) nf("where").value = store.get("newDir", null) || (await invoke("default_project_dir").catch(() => null)) || "";
+    nf("err").hidden = true;
+    newBoardPath();
+    newBoardSummary();
+    dlg.showModal();
+    nf("name").focus();
+    nf("name").select();
+  }
+
+  /** The new-board form -> {parent, project} for create_project, or an error message. */
+  function readNewBoard() {
+    const parent = nf("where").value.trim();
+    const name = nf("name").value.trim();
+    if (!name) return { error: "Give the board a name." };
+    if (!parent) return { error: "Choose where to create the project." };
+    const width = num("w"), height = num("h");
+    if (!(width > 0 && height > 0)) return { error: "Enter the board size in mm.", more: true };
+    let keyboard = null;
+    if (radio("kind") === "keyboard") {
+      const cols = num("cols"), rows = num("rows");
+      if (!(Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0)) return { error: "Enter whole numbers of columns and rows.", more: true };
+      const [pitch_x, pitch_y] = SWITCH_PITCH[radio("switch")];
+      keyboard = { rows, cols, pitch_x, pitch_y };
+    }
+    const project = { name, width, height, copper_layers: Number(radio("layers")), mounting_holes: nf("holes").checked, profile: nf("profile").value, keyboard };
+    return { parent, project, brief: nf("brief").value.trim() };
+  }
+
+  /** First message to the agent for a board started from a description. */
+  function planPrompt(p, brief) {
+    const kb = p.keyboard ? `, set up for a keyboard with ${p.keyboard.cols} × ${p.keyboard.rows} keys at ${p.keyboard.pitch_x} × ${p.keyboard.pitch_y} mm pitch` : "";
+    return [
+      `I just created this KiCad project in fabready and want to design it from scratch: ${p.name}, a ${p.width} × ${p.height} mm board with ${p.copper_layers} copper layers${kb}, to be made at ${PROFILE_LABELS[p.profile] || p.profile}. ` +
+        `The schematic and board are empty apart from the outline${p.mounting_holes ? " and mounting holes" : ""}.`,
+      "",
+      `What I want to build: ${brief}`,
+      "",
+      "Help me plan it before we draw anything:",
+      "1. Ask me what you need to know first (power source, connectors, size limits, how it gets assembled).",
+      "2. Suggest the main parts with real part numbers, and the KiCad symbols and footprints to use.",
+      "3. Outline the schematic blocks and how they connect.",
+      "4. Suggest a layout, and say whether the board size works.",
+      "Then walk me through building it in KiCad step by step. Don't edit my files unless I ask.",
+    ].join("\n");
+  }
+
+  async function createBoard(e) {
+    e.preventDefault();
+    const form = readNewBoard();
+    const err = nf("err");
+    if (form.error) {
+      err.textContent = form.error;
+      err.hidden = false;
+      if (form.more) $("nf-more").open = true;
+      return;
+    }
+    const btn = nf("create");
+    btn.disabled = true;
+    let dir;
+    try {
+      dir = await invoke("create_project", { parent: form.parent, project: form.project });
+    } catch (x) {
+      err.textContent = String(x);
+      err.hidden = false;
+      if (/bigger|600 mm|rows|columns|pitch/.test(String(x))) $("nf-more").open = true;
+      return;
+    } finally {
+      btn.disabled = false;
+    }
+    store.set("newDir", form.parent);
+    $("new-dialog").close();
+    nf("name").value = "my-board";
+    nf("brief").value = "";
+    await openProject(dir);
+    if (state.path !== dir || !state.payload) return;
+    if (form.brief) {
+      openChat();
+      chat.begin(planPrompt(form.project, form.brief));
+    }
+    toast(`Created ${form.project.name}. Add parts and wiring in KiCad; fabready re-checks every time you save.`, null,
+      { label: "Open in KiCad", run: openInKicad });
+  }
+
+  async function browseNewBoard() {
+    const picked = await invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Create the new project in…", defaultPath: nf("where").value.trim() || undefined } });
+    if (picked) {
+      nf("where").value = picked;
+      newBoardPath();
+    }
   }
 
   function setPanel(which, value) {
@@ -784,7 +938,34 @@
 
   // ------------------------------------------------------------ events
   $("open").onclick = pickProject;
-  $("open-empty").onclick = pickProject;
+  $("new").onclick = newBoard;
+  $("open-kicad").onclick = openInKicad;
+  $("welcome").addEventListener("click", (e) => {
+    const sample = e.target.closest("[data-sample]");
+    if (sample) return openSample(sample.dataset.sample, sample);
+    const start = e.target.closest("[data-start]");
+    if (!start) return;
+    const go = start.dataset.start;
+    if (go === "open") pickProject();
+    else if (go === "new") newBoard();
+    else welcomeStep(go === "samples" ? "samples" : "start");
+  });
+  $("new-form").addEventListener("submit", createBoard);
+  const onNewBoardInput = (e) => {
+    if (["nf-cols", "nf-rows"].includes(e.target.id) || ["nf-kind", "nf-switch"].includes(e.target.name)) {
+      $("new-dialog").classList.toggle("kb", radio("kind") === "keyboard");
+      if (radio("kind") === "keyboard") newBoardSize();
+      else if (e.target.name === "nf-kind") { nf("w").value = "50"; nf("h").value = "50"; }
+    }
+    if (e.target.id === "nf-name" || e.target.id === "nf-where") newBoardPath();
+    newBoardSummary();
+    nf("err").hidden = true;
+  };
+  $("new-form").addEventListener("input", onNewBoardInput);
+  // Not every engine fires `input` for radio buttons; handling both is harmless.
+  $("new-form").addEventListener("change", (e) => { if (e.target.type === "radio") onNewBoardInput(e); });
+  $("nf-browse").onclick = browseNewBoard;
+  $("nf-cancel").onclick = () => $("new-dialog").close();
   $("recheck").onclick = check;
   $("toggle-sidebar").onclick = () => setPanel("sidebar", "closed");
   $("show-sidebar").onclick = () => setPanel("sidebar", "open");
@@ -926,6 +1107,7 @@
   await listen("tauri://drag-leave", () => $("drop").classList.remove("over"));
   await listen("tauri://drag-drop", (e) => {
     $("drop").classList.remove("over");
+    if (document.querySelector("dialog[open]")) return;
     const p = e.payload && e.payload.paths && e.payload.paths[0];
     if (p) openProject(p);
   });
@@ -947,15 +1129,17 @@
   $("close-agents").onclick = () => $("agents-dialog").close();
 
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && state.preview && !$("agents-dialog").open) {
+    // Dialogs handle their own keys (Esc closes them); keep board shortcuts out of their text fields.
+    if (document.querySelector("dialog[open]")) return;
+    if (e.key === "Escape" && state.preview) {
       endPreview(true);
       return;
     }
-    if (state.payload && !state.preview && !$("agents-dialog").open && editor.keydown(e)) {
+    if (state.payload && !state.preview && editor.keydown(e)) {
       e.preventDefault();
       return;
     }
-    if (e.key === "Escape" && state.active != null && !$("agents-dialog").open) {
+    if (e.key === "Escape" && state.active != null) {
       state.active = null;
       canvas.focus(null);
       renderInspector();
@@ -965,6 +1149,7 @@
     if (!(e.metaKey || e.ctrlKey)) return;
     const actions = {
       o: pickProject,
+      n: newBoard,
       r: check,
       b: () => setPanel("sidebar", app.dataset.sidebar === "open" ? "closed" : "open"),
       i: () => setPanel("inspector", app.dataset.inspector === "open" ? "closed" : "open"),

@@ -50,10 +50,10 @@ cd app && npx tauri build --bundles app    # build fabready.app (target/release/
 
 | Path | What |
 |---|---|
-| `crates/fabready-core` | Engine: KiCad parser, checks, fixes, parts review, SVG/PNG renderer, report, MCP server, shared viewer (`assets/`) |
+| `crates/fabready-core` | Engine: KiCad parser, checks, fixes, parts review, SVG/PNG renderer, report, MCP server, new-project scaffold (`scaffold.rs`), shared viewer (`assets/`) |
 | `crates/fabready-cli` | `fabready` binary |
 | `app/` | Tauri desktop app (`src-tauri/` Rust commands, `ui/` HTML/CSS/JS, no bundler) |
-| `samples/` | Generated boards from `samples/generate.py`: keyboard macropads (clean and buggy) and a sensor board with component problems |
+| `samples/` | Generated boards from `samples/generate.py`: keyboard macropads (clean and buggy) and a sensor board with component problems. The app embeds them for "Try a sample" (`SAMPLES` in `app/src-tauri/src/lib.rs`) |
 | `docs/` | User docs. Keep `README.md` short and put details here |
 
 - New checks go in `crates/fabready-core/src/{keyboard,fab,connectivity}.rs`. Register the id in `findings::CATALOG`.

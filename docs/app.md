@@ -10,19 +10,49 @@ cd app && npm install
 npx tauri build --bundles app      # fabready.app in target/release/bundle/macos/
 ```
 
-Open a project with **Open project** (⌘O), by dropping a project folder or board file on the window, or from
-the command line: `fabready-app ~/pcbs/my-board`.
+## Getting started
+
+When no project is open, the app asks where you're starting from:
+
+- **I have a design:** open a KiCad project with **Open project** (⌘O), by dropping a project folder or board
+  file on the window, or from the command line: `fabready-app ~/pcbs/my-board`.
+- **Start a new board** (also **New board** in the sidebar, ⌘N): creates a KiCad project for you and opens it.
+  See below.
+- **Try a sample:** opens a fresh copy of one of the boards in `samples/`: a keyboard macropad with planted
+  mistakes, a sensor board with part problems, or the clean macropad. The copies live in the app's data folder
+  and are replaced each time you pick one. Their footprints are simplified stand-ins, so don't order them.
+
+### New board
+
+Pick a name and a location (by default `~/Documents/KiCad` when it exists). The app creates a folder with:
+
+- `<name>.kicad_pro` and an empty `<name>.kicad_sch`,
+- `<name>.kicad_pcb` with the board outline at the size you chose, 2 or 4 copper layers, and optionally M3
+  mounting holes 4 mm in from each corner (marked "board only", so updating the PCB from the schematic keeps them),
+- `fabready.json` with the fab profile you chose.
+
+**Keyboard** asks for the switch type (MX-style 19.05 mm or Choc 18 × 17 mm) and the number of columns and rows.
+It sizes the board to fit the keys with room above them for the controller, draws a key grid guide on
+User.Drawings to place switches on, and saves the key pitch to `fabready.json`. The **Board** row shows the
+result in one line; click **Change** to set the switches, keys or board size yourself.
+
+The app refuses to create a project in a folder that already has files in it. Click **Open in KiCad** in the
+header (also there for any open project) to add the schematic and parts. fabready re-checks each time you save.
+
+If you fill in **What are you building?**, the Agent tab opens and sends your description with a request to
+plan the board: questions first, then the main parts with their KiCad symbols and footprints, the schematic
+blocks and a layout. If the agent isn't set up yet, the message waits in the composer instead.
 
 ## Layout
 
-- **Sidebar:** recent projects, each with a status dot and its error count. At the bottom, **Connect agents**
-  and whether KiCad's DRC is available.
+- **Sidebar:** **New board**, **Open project** and recent projects, each with a status dot and its error count.
+  At the bottom, **Connect agents** and whether KiCad's DRC is available.
 - **Board:** click a marker to select its finding, click a track, via or footprint to edit it, and hover a pad
   to light up its net. Scroll with two fingers to pan, and pinch or ⌘-scroll to zoom. The toolbar at the bottom
   holds the layers, the view side, the editing tools, undo and zoom (see below). The app follows the macOS
   light/dark setting.
-- **Header:** the fab profile (saved to `fabready.json`), re-check, and export. Export writes `report.json`,
-  `report.md`, `viewer.html` and `board.png` to `fabready-out/`.
+- **Header:** the fab profile (saved to `fabready.json`), re-check, **Open in KiCad**, and export. Export writes
+  `report.json`, `report.md`, `viewer.html` and `board.png` to `fabready-out/`.
 - **Inspector** (resizable), with five tabs:
   - **Agent**: a chat with your coding agent (see below).
   - **Findings**, filterable by severity. Click one to zoom to it on the board.
@@ -165,6 +195,7 @@ have unsaved edits. Every setting is described in [configuration.md](configurati
 
 | Keys | Action |
 |---|---|
+| ⌘N | New board |
 | ⌘O | Open project |
 | ⌘L | Open the agent chat |
 | ⌘R | Re-check |
