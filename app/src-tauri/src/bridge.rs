@@ -59,7 +59,8 @@ pub fn start(app: AppHandle) -> std::io::Result<Arc<Bridge>> {
     let active = Arc::new(AtomicUsize::new(0));
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            if active.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < MAX_CONNECTIONS).then_some(n + 1)).is_err() {
+            if active.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
+                active.fetch_sub(1, Ordering::AcqRel);
                 continue;
             }
             let (b, app) = (b.clone(), app.clone());
@@ -75,7 +76,7 @@ pub fn start(app: AppHandle) -> std::io::Result<Arc<Bridge>> {
 
 fn serve(bridge: &Bridge, app: &AppHandle, stream: TcpStream) -> std::io::Result<()> {
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     let bytes = reader.take((MAX_REQUEST_BYTES + 1) as u64).read_line(&mut line)?;
     if bytes > MAX_REQUEST_BYTES {
