@@ -51,6 +51,10 @@
     plus: '<path d="M3.5 8h9M8 3.5v9"/>',
     layers: '<path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.2 8 11.2 14 8.2M2 10.9 8 13.9 14 10.9"/>',
     external: '<path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/>',
+    gear: '<circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.15 1.15M11.25 11.25l1.15 1.15M3.6 12.4l1.15-1.15M11.25 4.75l1.15-1.15"/><circle cx="8" cy="8" r="4.2"/>',
+    sun: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05"/>',
+    chip: '<rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 1.8V4M9.5 1.8V4M6.5 12v2.2M9.5 12v2.2M1.8 6.5H4M1.8 9.5H4M12 6.5h2.2M12 9.5h2.2"/>',
+    info: '<circle cx="8" cy="8" r="6"/><path d="M8 7.2V11M8 5v.01"/>',
   };
   const icon = (name) =>
     `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
@@ -129,7 +133,7 @@
     finding: (i) => state.payload && state.payload.report.findings[i],
     focusRefs: (refs) => canvas.focusRefs(refs),
     startPreview: (ids) => startPreview(ids, true),
-    openMcp: () => $("agents").click(),
+    openMcp: () => settings.open("agents"),
     view: () => canvas.view(),
     showLayers: (names) => canvas.showLayers(names),
     setSide: (side) => canvas.setSide(side),
@@ -148,6 +152,33 @@
     recordUndo: (path, verb, label) => chat.event(path, { agent: `The user ${verb.toLowerCase()} a change: ${label}.`, user: `${verb}: ${label}.` }),
     ask: (infos) => { openChat(); chat.askItems(infos.map((i) => ({ info: i, text: editor.describe(i) }))); },
   });
+
+  const tour = window.FabreadyTour({
+    esc, icon,
+    report: () => state.payload && state.payload.report,
+    path: () => state.path,
+    select: (i) => { setTab("findings"); select(i, true); },
+    setTab: (tab) => setTab(tab),
+  });
+
+  let onboarding = null;
+  const setup = window.FabreadySetup({
+    invoke, listen, esc, icon, toast,
+    onChange: () => onboarding && onboarding.refresh(),
+    onDone: (id, ok, message) => {
+      if (ok) {
+        toast(message);
+        if (state.path) check();
+      } else if (!/cancelled/i.test(message)) {
+        toast(message.split("\n")[0], "error", { label: "Details", run: () => settings.open("setup") });
+      }
+    },
+  });
+
+  const settings = window.FabreadySettings({
+    invoke, store, esc, icon, ago, copyText, editor, setup,
+  });
+  onboarding = window.FabreadyOnboarding({ invoke, store, esc, icon, setup, previews: samplePreviews, onFinish: () => finishSetup() });
 
   // ------------------------------------------------------------ helpers
   function ago(t) {
@@ -201,12 +232,6 @@
     // Left-to-right marks keep the slashes in place inside the right-to-left (truncate-from-the-left) label.
     $("project-path").textContent = state.path ? `\u200E${state.path}\u200E` : "";
     document.title = state.path ? `${basename(state.path)} — fabready` : "fabready";
-    const r = state.payload && state.payload.report;
-    if (r) {
-      const t = r.tools || {};
-      $("kicad-status").textContent = t.kicad_cli ? `KiCad DRC: on · ${t.kicad_version || ""}` : "KiCad DRC: not installed";
-      $("kicad-status").title = t.kicad_cli ? t.kicad_cli : "Install KiCad for its full DRC/ERC: brew install --cask kicad";
-    }
   }
 
   function markTab(tab) {
@@ -279,8 +304,7 @@
     app.dataset.state = "ready";
     $("welcome").hidden = true;
     $("canvas").hidden = false;
-    for (const id of ["profile-field", "recheck", "open-kicad", "export", "toggle-inspector"]) $(id).hidden = false;
-    $("profile").value = payload.report.profile;
+    for (const id of ["recheck", "open-kicad", "export", "toggle-inspector"]) $(id).hidden = false;
     canvas.update(payload.svg, payload.report.board);
     if (state.active != null && !payload.report.findings[state.active]) state.active = null;
     const f = state.active != null ? payload.report.findings[state.active] : null;
@@ -308,8 +332,17 @@
   }
 
   // ------------------------------------------------------------ checking
+  let kicadPrompted = false;
+  /** Once per run: a check ran without kicad-cli, so KiCad's DRC and ERC were skipped. */
+  function promptKicad(report) {
+    if (kicadPrompted || (report.tools && report.tools.kicad_cli) || setup.installing("kicad")) return;
+    kicadPrompted = true;
+    toast("KiCad isn't installed, so its DRC and ERC are skipped.", null, { label: "Install", run: () => settings.open("setup") });
+  }
+
   function accept(payload) {
     rememberProject(state.path, payload.report);
+    promptKicad(payload.report);
     if (state.preview) {
       // Keep the preview on screen; applying will notice the file changed and ask to preview again.
       state.payload = payload;
@@ -362,22 +395,44 @@
   }
 
   // ------------------------------------------------------------ onboarding (welcome screen, new board, samples)
-  function welcomeStep(step) {
-    $("onb-start").hidden = step !== "start";
-    $("onb-samples").hidden = step !== "samples";
-    const first = step === "samples" ? document.querySelector("[data-sample]") : $("drop");
-    if (first) first.focus();
-  }
-
-  async function openSample(name, row) {
-    if (row) row.setAttribute("aria-busy", "true");
+  async function openSample(name, card) {
+    if (card) card.setAttribute("aria-busy", "true");
     try {
-      await openProject(await invoke("open_sample", { name }));
+      const dir = await invoke("open_sample", { name });
+      await openProject(dir);
+      if (state.path === dir && state.payload && store.get("sampleTour", true)) tour.start();
     } catch (e) {
       toast(String(e), "error");
     } finally {
-      if (row) row.removeAttribute("aria-busy");
+      if (card) card.removeAttribute("aria-busy");
     }
+  }
+
+  /** Each sample board drawn with its finding markers, as blob URLs by name (null if they couldn't be drawn). */
+  let previews = null;
+  function samplePreviews() {
+    previews = previews || invoke("sample_previews")
+      .then((list) => Object.fromEntries(list.map(({ name, svg }) => [name, URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }))])))
+      .catch(() => null);
+    return previews;
+  }
+
+  /** Draw each sample board (with its finding markers) on its welcome card. */
+  async function loadSamplePreviews() {
+    const urls = await samplePreviews();
+    if (!urls) return $("onb-samples").classList.add("no-thumbs");
+    for (const [name, url] of Object.entries(urls)) {
+      const box = document.querySelector(`[data-thumb="${name}"]`);
+      if (box) box.innerHTML = `<img alt="" src="${url}">`;
+    }
+  }
+
+  function setTab(tab) {
+    if (app.dataset.inspector === "closed") setPanel("inspector", "open");
+    if (state.tab === tab) return;
+    state.tab = tab;
+    store.set("tab", tab);
+    renderInspector();
   }
 
   async function openInKicad() {
@@ -385,8 +440,15 @@
     try {
       await invoke("open_in_kicad", { path: state.path });
     } catch (e) {
-      toast(String(e), "error");
+      const missing = /Couldn't start KiCad/.test(String(e));
+      toast(String(e), "error", missing ? { label: "Install KiCad", run: () => settings.open("setup") } : undefined);
     }
+  }
+
+  /** After first-launch setup: it showed what's missing, so don't remind them on the first check. */
+  function finishSetup() {
+    if (setup.missing().length) kicadPrompted = true;
+    if (!state.path) $("drop").focus();
   }
 
   const SWITCH_PITCH = { mx: [19.05, 19.05], choc: [18, 17] };
@@ -423,7 +485,8 @@
   async function newBoard() {
     const dlg = $("new-dialog");
     if (dlg.open) return;
-    if (!nf("where").value.trim()) nf("where").value = store.get("newDir", null) || (await invoke("default_project_dir").catch(() => null)) || "";
+    nf("where").value = store.get("newDir", null) || (await invoke("default_project_dir").catch(() => null)) || "";
+    nf("profile").value = store.get("newProfile", "jlcpcb");
     nf("err").hidden = true;
     newBoardPath();
     newBoardSummary();
@@ -822,7 +885,7 @@
     }
   }
 
-  /** Change fabready.json on disk (header profile, Waive) without losing unsaved edits in the form. */
+  /** Change fabready.json on disk (Waive and its Undo) without losing unsaved edits in the form. */
   async function updateConfig(change) {
     const path = state.path;
     if (!path) return false;
@@ -847,7 +910,6 @@
       return true;
     } catch (e) {
       toast(String(e), "error");
-      if (state.payload) $("profile").value = state.payload.report.profile;
       return false;
     }
   }
@@ -869,12 +931,6 @@
   // ------------------------------------------------------------ agent hand-off
   async function refreshAgent() {
     try { state.agent = await invoke("agent_status"); } catch { state.agent = null; }
-    const el = $("agent-status");
-    el.hidden = !state.agent;
-    if (state.agent) {
-      el.textContent = `Agent: ${state.agent.client} · ${ago(state.agent.at * 1000)}`;
-      el.title = "Last agent that connected to fabready over MCP";
-    }
   }
 
   function promptFor(indices) {
@@ -888,7 +944,7 @@
       else if (f.fix) lines.push(`   Suggested fix: ${f.fix}`);
       return lines.join("\n");
     }).join("\n\n");
-    const setup = state.exe ? `claude mcp add fabready -- "${state.exe}" mcp` : "the Connect agents dialog in the fabready app";
+    const setup = state.exe ? `claude mcp add fabready -- "${state.exe}" mcp` : "Settings in the fabready app";
     return [
       `Please fix ${indices.length === 1 ? "this issue" : "these issues"} in my KiCad PCB project before I order it.`,
       "",
@@ -945,10 +1001,8 @@
     if (sample) return openSample(sample.dataset.sample, sample);
     const start = e.target.closest("[data-start]");
     if (!start) return;
-    const go = start.dataset.start;
-    if (go === "open") pickProject();
-    else if (go === "new") newBoard();
-    else welcomeStep(go === "samples" ? "samples" : "start");
+    if (start.dataset.start === "open") pickProject();
+    else if (start.dataset.start === "new") newBoard();
   });
   $("new-form").addEventListener("submit", createBoard);
   const onNewBoardInput = (e) => {
@@ -970,10 +1024,6 @@
   $("toggle-sidebar").onclick = () => setPanel("sidebar", "closed");
   $("show-sidebar").onclick = () => setPanel("sidebar", "open");
   $("toggle-inspector").onclick = () => setPanel("inspector", app.dataset.inspector === "open" ? "closed" : "open");
-  $("profile").onchange = (e) => {
-    const profile = e.target.value;
-    updateConfig((c) => { c.profile = profile; });
-  };
   $("export").onclick = async () => {
     try {
       const dir = await invoke("export_report", { path: state.path });
@@ -1112,25 +1162,15 @@
     if (p) openProject(p);
   });
 
-  // Agents dialog: this same app binary is the MCP server (`<app> mcp`).
-  $("agents").onclick = async () => {
-    const exe = await invoke("mcp_command");
-    const json = JSON.stringify({ mcpServers: { fabready: { command: exe, args: ["mcp"] } } }, null, 2);
-    const claude = `claude mcp add fabready -- "${exe}" mcp`;
-    const codex = `codex mcp add fabready -- "${exe}" mcp`;
-    $("mcp-json").textContent = json;
-    $("mcp-claude").textContent = claude;
-    $("mcp-codex").textContent = codex;
-    $("copy-json").onclick = () => { copyText(json); toast("Copied MCP config"); };
-    $("copy-claude").onclick = () => { copyText(claude); toast("Copied command"); };
-    $("copy-codex").onclick = () => { copyText(codex); toast("Copied command"); };
-    $("agents-dialog").showModal();
-  };
-  $("close-agents").onclick = () => $("agents-dialog").close();
+  $("settings").onclick = () => settings.open();
 
   window.addEventListener("keydown", (e) => {
     // Dialogs handle their own keys (Esc closes them); keep board shortcuts out of their text fields.
     if (document.querySelector("dialog[open]")) return;
+    if (e.key === "Escape" && tour.active()) {
+      tour.end();
+      return;
+    }
     if (e.key === "Escape" && state.preview) {
       endPreview(true);
       return;
@@ -1157,6 +1197,7 @@
       s: () => state.tab === "settings" && dirty() && saveSettings(),
       enter: () => state.preview && applyPreview(),
       l: openChat,
+      ",": () => settings.open(),
     };
     if (e.shiftKey && e.key.toLowerCase() === "f" && state.payload && state.payload.report.fixes.length && !state.preview) {
       e.preventDefault();
@@ -1176,7 +1217,10 @@
   renderProjects();
   refreshAgent();
   invoke("mcp_command").then((exe) => (state.exe = exe)).catch(() => {});
-  $("kicad-status").textContent = "KiCad DRC: open a project to detect";
   const initial = await invoke("initial_path");
   if (initial) openProject(initial);
+  else {
+    loadSamplePreviews();
+    onboarding.maybeOpen();
+  }
 })();

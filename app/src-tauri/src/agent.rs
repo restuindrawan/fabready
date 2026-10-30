@@ -65,7 +65,7 @@ fn spec(id: &str) -> Result<&'static Spec, String> {
 
 /// The user's login-shell environment. Apps opened from the Finder don't get the PATH or API keys set in
 /// shell profiles, and agents need both (node from nvm, ~/.opencode/bin, ANTHROPIC_API_KEY…).
-fn user_env() -> &'static Vec<(OsString, OsString)> {
+pub(crate) fn user_env() -> &'static Vec<(OsString, OsString)> {
     static ENV: OnceLock<Vec<(OsString, OsString)>> = OnceLock::new();
     ENV.get_or_init(|| {
         let mut vars: HashMap<OsString, OsString> = std::env::vars_os().collect();
@@ -121,7 +121,8 @@ fn login_shell_env() -> Vec<(OsString, OsString)> {
     Vec::new()
 }
 
-fn find(program: &str) -> Option<PathBuf> {
+/// A program on the user's shell PATH (see `user_env`).
+pub(crate) fn find(program: &str) -> Option<PathBuf> {
     let path = user_env().iter().find(|(k, _)| k == "PATH")?.1.clone();
     let exts: &[&str] = if cfg!(windows) { &[".cmd", ".exe", ""] } else { &[""] };
     std::env::split_paths(&path).find_map(|dir| exts.iter().map(|e| dir.join(format!("{program}{e}"))).find(|p| p.is_file()))

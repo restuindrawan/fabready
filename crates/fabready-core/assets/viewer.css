@@ -66,7 +66,7 @@
 .pl-side{display:flex;gap:2px}
 .pcbv-overlay .pl-side button[aria-pressed="true"]{background:var(--active);color:var(--text)}
 .pl-body{width:240px;max-height:min(520px,calc(100vh - 160px));overflow:auto;padding:4px 2px 6px;margin-bottom:4px;border-bottom:1px solid var(--line);scrollbar-width:thin}
-.pl-sec{padding:8px 8px 3px;font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.pl-sec{padding:8px 8px 3px;font-size:12px;font-weight:600;color:var(--dim)}
 .pl-row{display:flex;align-items:center;border-radius:7px}
 .pl-row:hover{background:var(--hover)}
 .pcbv-overlay .pl-vis{flex:1;min-width:0;padding:5px 8px}

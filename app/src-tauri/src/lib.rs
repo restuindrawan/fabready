@@ -5,6 +5,7 @@ use std::time::Duration;
 
 mod agent;
 mod bridge;
+mod setup;
 
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult, Debouncer};
 use fabready_core::config::{self, Config, Rules};
@@ -324,11 +325,10 @@ const SAMPLES: &[(&str, &[(&str, &str)])] = &[
     ]),
 ];
 
-/// Write a fresh copy of a sample to the app's data folder (replacing any earlier copy). Returns its folder.
-#[tauri::command]
-fn open_sample(app: AppHandle, name: String) -> Result<String, String> {
+/// Write a fresh copy of sample `name` to `root/<name>` (replacing any earlier copy). Returns its folder.
+fn write_sample(root: &Path, name: &str) -> Result<PathBuf, String> {
     let (_, files) = SAMPLES.iter().find(|(n, _)| *n == name).ok_or_else(|| format!("unknown sample '{name}'"))?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("samples").join(&name);
+    let dir = root.join(name);
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("clearing {}: {e}", dir.display()))?;
     }
@@ -336,7 +336,40 @@ fn open_sample(app: AppHandle, name: String) -> Result<String, String> {
     for (file, text) in files.iter() {
         std::fs::write(dir.join(file), text).map_err(|e| format!("writing {file}: {e}"))?;
     }
-    Ok(dir.display().to_string())
+    Ok(dir)
+}
+
+/// Write a fresh copy of a sample to the app's data folder (replacing any earlier copy). Returns its folder.
+#[tauri::command]
+fn open_sample(app: AppHandle, name: String) -> Result<String, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?.join("samples");
+    write_sample(&root, &name).map(|d| d.display().to_string())
+}
+
+#[derive(Serialize)]
+struct SamplePreview {
+    name: &'static str,
+    /// The board with its finding markers, as the canvas shows it once the sample is open.
+    svg: String,
+}
+
+/// Every sample drawn with its findings, for the welcome screen's sample cards. Skips kicad-cli to stay quick.
+#[tauri::command]
+async fn sample_previews(app: AppHandle) -> Result<Vec<SamplePreview>, String> {
+    let root = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("sample-previews");
+    tauri::async_runtime::spawn_blocking(move || {
+        let opts = Options { use_kicad: false, ..Default::default() };
+        SAMPLES
+            .iter()
+            .map(|(name, _)| {
+                let dir = write_sample(&root, name)?;
+                let result = report::run(&dir, &opts).map_err(|e| format!("{e:#}"))?;
+                Ok(SamplePreview { name, svg: result.svg })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Open the project (its .kicad_pro, or the board when there is none) in KiCad.
@@ -345,7 +378,7 @@ fn open_in_kicad(path: String) -> Result<(), String> {
     let (pcb, _) = report::resolve(Path::new(&path)).map_err(|e| format!("{e:#}"))?;
     let pro = pcb.with_extension("kicad_pro");
     let target = if pro.exists() { pro } else { pcb };
-    let missing = "Couldn't start KiCad. Install it from kicad.org (on a Mac: brew install --cask kicad), then try again.";
+    let missing = "Couldn't start KiCad. Is it installed?";
     #[cfg(target_os = "macos")]
     {
         let out = std::process::Command::new("open").arg("-a").arg("KiCad").arg(&target).output().map_err(|e| e.to_string())?;
@@ -366,6 +399,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .manage(agent::Agents::default())
+        .manage(setup::Installs::default())
         .setup(|app| {
             app.manage(bridge::start(app.handle().clone())?);
             Ok(())
@@ -381,6 +415,7 @@ pub fn run() {
             default_project_dir,
             create_project,
             open_sample,
+            sample_previews,
             open_in_kicad,
             preview_fixes,
             apply_fixes,
@@ -399,7 +434,11 @@ pub fn run() {
             agent::agent_permission,
             agent::agent_set_config,
             agent::agent_set_mode,
-            agent::agent_stop
+            agent::agent_stop,
+            setup::setup_status,
+            setup::setup_install,
+            setup::setup_cancel,
+            setup::setup_download
         ])
         .build(tauri::generate_context!())
         .expect("error while running fabready")

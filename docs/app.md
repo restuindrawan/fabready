@@ -18,9 +18,14 @@ When no project is open, the app asks where you're starting from:
   file on the window, or from the command line: `fabready-app ~/pcbs/my-board`.
 - **Start a new board** (also **New board** in the sidebar, ⌘N): creates a KiCad project for you and opens it.
   See below.
-- **Try a sample:** opens a fresh copy of one of the boards in `samples/`: a keyboard macropad with planted
-  mistakes, a sensor board with part problems, or the clean macropad. The copies live in the app's data folder
-  and are replaced each time you pick one. Their footprints are simplified stand-ins, so don't order them.
+- **Try a sample:** the cards under the two choices show each board in `samples/` with the problems fabready
+  finds marked on it: a keyboard macropad with planted mistakes, a sensor board with part problems, and the clean
+  macropad. Clicking one opens a fresh copy. The copies live in the app's data folder and are replaced each time
+  you pick one. Their footprints are simplified stand-ins, so don't order them.
+
+  A short tour starts when the sample opens. A numbered card points at the problems on the board, a finding,
+  the automatic fixes or the parts (whichever the sample has), and the agent. **Next** moves on, and **Skip tour**,
+  the close button or Esc ends it.
 
 ### New board
 
@@ -45,13 +50,14 @@ blocks and a layout. If the agent isn't set up yet, the message waits in the com
 
 ## Layout
 
-- **Sidebar:** **New board**, **Open project** and recent projects, each with a status dot and its error count.
-  At the bottom, **Connect agents** and whether KiCad's DRC is available.
+- **Sidebar:** **New board**, the folder button next to it (**Open project**, ⌘O) and recent projects, each with a
+  status dot and its error count.
+  At the bottom, **Settings** (⌘,) opens the app's settings (see below).
 - **Board:** click a marker to select its finding, click a track, via or footprint to edit it, and hover a pad
   to light up its net. Scroll with two fingers to pan, and pinch or ⌘-scroll to zoom. The toolbar at the bottom
   holds the layers, the view side, the editing tools, undo and zoom (see below). The app follows the macOS
   light/dark setting.
-- **Header:** the fab profile (saved to `fabready.json`), re-check, **Open in KiCad**, and export. Export writes
+- **Header:** re-check, **Open in KiCad**, and export. The fab profile is in the inspector's **Settings** tab. Export writes
   `report.json`, `report.md`, `viewer.html` and `board.png` to `fabready-out/`.
 - **Inspector** (resizable), with five tabs:
   - **Agent**: a chat with your coding agent (see below).
@@ -59,6 +65,38 @@ blocks and a layout. If the agent isn't set up yet, the message waits in the com
   - **Parts**: the component review (see [parts.md](parts.md)). Click a part to highlight it.
   - **Board**: size, counts and the fab limits in use.
   - **Settings**: the project's `fabready.json` (see below).
+
+## App settings
+
+**Settings** in the sidebar (⌘,) holds preferences for the whole app, as opposed to a project's own settings in the
+inspector's Settings tab. A search box and a list of pages sit on the left. Changes apply right away.
+
+- **General:** where new boards are created, the fab new boards start with, and whether a tour runs when a sample opens.
+- **Appearance:** Light, Dark or Sync with system.
+- **Editor:** the track width, via diameter and via drill the route and via tools use.
+- **Agents:** the agent new conversations in the Agent tab use, and the MCP setup for using fabready from your own
+  terminal or editor.
+- **Setup:** the apps fabready works with and whether they're installed (see below).
+- **About:** version, privacy and license.
+
+## Setup
+
+fabready works without anything else installed. With KiCad installed, every check also runs KiCad's own DRC and
+ERC (through `kicad-cli`), and **Open in KiCad** works.
+
+The first time the app opens, a short setup window steps through **Welcome → KiCad → Agent → Start**: install
+KiCad if it's missing (or skip it), pick the agent the Agent tab uses, and start. Closing it at any step finishes
+it, and it doesn't open again. The KiCad list is also in **Settings → Setup**, and a reminder with an **Install**
+button appears once per session when a check runs without KiCad.
+
+**Install** runs the platform's package manager in the background and shows its progress:
+
+- macOS: `brew install --cask kicad` (Homebrew). KiCad's package writes to `/Library`, so macOS asks for your
+  password in a system dialog; the password goes to `sudo`, not to fabready.
+- Windows: `winget install --id KiCad.KiCad`.
+
+Without Homebrew or winget, or on Linux, **Download** opens KiCad's download page instead. Nothing is installed
+unless you click **Install**, and **Cancel** stops it.
 
 ## Layers
 
@@ -166,7 +204,7 @@ in from Terminal and press **Try again**.
 
 Every session gets the fabready MCP server, with three extra tools that talk to the open window:
 `app_state`, `show_on_board` and `propose_fix`. If you'd rather use your agent in its own terminal or editor,
-**Connect agents** shows the MCP setup. **Copy as prompt**, next to attached findings, copies a ready-made
+**Settings** (Agents page) shows the MCP setup. **Copy as prompt**, next to attached findings, copies a ready-made
 prompt for it.
 
 ## Waiving findings
@@ -209,6 +247,7 @@ have unsaved edits. Every setting is described in [configuration.md](configurati
 | ⌘⇧F | Preview all automatic fixes |
 | ⌘↩ | Apply the previewed fixes |
 | ⌘S | Save settings |
+| ⌘, | Open app settings (KiCad, agent setup) |
 | L | Show or hide the layers panel |
 | Arrows, R, ⌫ | Nudge, rotate or delete the selected items |
 | Esc | Cancel a preview or route, leave a tool, deselect, or clear the selected finding |

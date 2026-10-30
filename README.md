@@ -31,10 +31,32 @@ cd app && npm install
 npx tauri build --bundles app      # fabready.app in target/release/bundle/macos/
 ```
 
-Open a KiCad project folder, or drop it on the window. No design yet? Start a new board (the app creates the
+The first time it opens, a short setup installs KiCad if it's missing and lets you pick your coding agent. Then
+open a KiCad project folder, or drop it on the window. No design yet? Start a new board (the app creates the
 KiCad project) or try a sample. The app re-checks every time you save in KiCad. You
 can view the board layer by layer, edit it Figma-style (move footprints, route tracks, place vias, measure,
 undo), and chat with Claude Code, Codex or OpenCode about the board you have open.
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/setup-dark.png">
+        <img alt="First-launch setup: a welcome step beside a sample keyboard board with problems fabready found on it" src="docs/images/setup-light.png">
+      </picture>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/welcome-dark.png">
+        <img alt="The welcome screen: open a design, start a new board, or try one of three sample boards" src="docs/images/welcome-light.png">
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">First launch: install KiCad and pick your agent</td>
+    <td align="center">Start from your design, a new board or a sample</td>
+  </tr>
+</table>
 
 **Command line:**
 
@@ -67,7 +89,8 @@ Each board's settings (fab profile, limit overrides, power rails, waived finding
 
 fabready runs entirely on your machine and makes no network requests itself. The app's Agent tab starts the
 coding agent you pick (Claude Code, Codex or OpenCode). That agent talks to its own AI provider, and on
-first use `npx` downloads its adapter from npm. Nothing is sent until you use the chat. fabready only writes:
+first use `npx` downloads its adapter from npm. Nothing is sent until you use the chat. If you click **Install**
+for KiCad in the app's setup, it runs Homebrew or winget, which download KiCad. fabready only writes:
 
 - `fabready-out/` next to your board: reports, images, and backups made before automatic fixes
 - your `.kicad_pcb`, only when you or your agent apply an automatic fix, or you edit the board in the app

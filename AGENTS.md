@@ -80,6 +80,7 @@ cd app && npx tauri build --bundles app    # build fabready.app (target/release/
   and served to the app through the `viewer_assets` command, so change it in one place only.
 - The app frontend (`app/ui/`) is plain HTML/CSS/JS with no build step. It uses `window.__TAURI__` (`withGlobalTauri`).
   Debug builds embed `app/ui`, so rebuild after editing it unless you're running `tauri dev`.
+  Follow `DESIGN.md` for UI changes (labels, text, dialogs, empty states).
 - Agent chat: `app/src-tauri/src/agent.rs` is an [ACP](https://agentclientprotocol.com) client (one process per
   agent, one session per project; `opencode acp`, or the official Claude Code and Codex adapters, through `npx`
   when they aren't installed). Each session gets `<app> mcp` with `FABREADY_APP_*` set, which turns on the app tools
@@ -90,5 +91,11 @@ cd app && npx tauri build --bundles app    # build fabready.app (target/release/
   `Config::save` keeps unknown keys. The app's Settings tab (`load_config` / `save_config` commands) and Waive
   button write through it; the app passes no profile override, so the file is the single source of truth.
   When adding a setting, add it to the Settings form in `app/ui/app.js` and to `docs/configuration.md`.
+- App-wide preferences (not per project) live in `app/ui/settings.js`: one entry in `GROUPS` (menu, with search words)
+  and `PAGE_HTML` per page, values in the app's local storage. Document them under "App settings" in `docs/app.md`.
+- Setup (apps fabready works with, now just KiCad): detection and installs in `app/src-tauri/src/setup.rs`, the list
+  in `app/ui/setup.js`, shown in the first-launch setup window (`app/ui/onboard.js`: Welcome → KiCad → Agent →
+  Start) and in Settings → Setup. Installs only run when the user clicks Install, through the platform's package
+  manager.
 - When a change affects users, update the matching page in `docs/`. Keep `README.md` to the overview,
   quick start, privacy, disclaimer and license.
