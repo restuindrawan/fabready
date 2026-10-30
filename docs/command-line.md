@@ -109,5 +109,5 @@ Claude Desktop, Cursor and other MCP clients:
 }
 ```
 
-The app's **Connect agents** button shows these, filled in with the app's own path. How agents should use
+The app's **Settings** (Agents page) shows these, filled in with the app's own path. How agents should use
 these tools is described in [AGENTS.md](../AGENTS.md).

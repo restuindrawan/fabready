@@ -650,6 +650,9 @@ window.FabreadyEditor = function createEditor(d) {
       if (sel.items.length && !busy && !pendingEdits().length) loadInfos();
     },
     clear() { cancelRoute(); measure = null; return setSelection([]); },
+    /** Route and via tool values (track width, via size and drill), for the app's Settings. */
+    toolSettings: () => Object.assign({}, settings),
+    setToolSettings(patch) { Object.assign(settings, patch); saveSettings(); renderBar(); },
     projectChanged() {
       cancelRoute();
       measure = null;

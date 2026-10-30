@@ -14,16 +14,15 @@
         <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
       </div>
       <div class="sb-actions">
-        <button class="sb-new" id="open"><span class="ico" data-icon="folder"></span>Open project<kbd>⌘O</kbd></button>
+        <button class="sb-new" id="new"><span class="ico" data-icon="plus"></span>New board<kbd>⌘N</kbd></button>
+        <button class="sb-new sb-icon" id="open" title="Open project (⌘O)" aria-label="Open project"><span class="ico" data-icon="folder"></span></button>
       </div>
       <nav class="sb-scroll">
         <div class="sb-label">Projects</div>
         <ul class="sb-list" id="projects"></ul>
       </nav>
       <div class="sb-foot">
-        <button class="sb-row" id="agents"><span class="ico" data-icon="plug"></span>Connect agents</button>
-        <div class="sb-meta" id="agent-status" hidden></div>
-        <div class="sb-meta" id="kicad-status">KiCad DRC: checking…</div>
+        <button class="sb-row" id="settings"><span class="ico" data-icon="gear"></span>Settings<kbd>⌘,</kbd></button>
       </div>
     </aside>
 
@@ -36,13 +35,8 @@
           <span class="mh-path" id="project-path" data-tauri-drag-region></span>
         </div>
         <div class="mh-actions">
-          <label class="select" id="profile-field" hidden title="Fab capability profile (saved in fabready.json)">
-            <select id="profile" aria-label="Fab profile">
-              <option value="jlcpcb">JLCPCB</option>
-              <option value="safe">Safe (any fab)</option>
-            </select>
-          </label>
           <button class="icon-btn" id="recheck" hidden title="Re-check (⌘R)" aria-label="Re-check"><span class="ico" data-icon="refresh"></span></button>
+          <button class="icon-btn" id="open-kicad" hidden title="Open in KiCad" aria-label="Open in KiCad"><span class="ico" data-icon="external"></span></button>
           <button class="icon-btn" id="export" hidden title="Export report, viewer and images to fabready-out/" aria-label="Export report"><span class="ico" data-icon="download"></span></button>
           <button class="icon-btn" id="toggle-inspector" hidden title="Toggle inspector (⌘I)" aria-label="Toggle inspector"></button>
         </div>
@@ -59,12 +53,37 @@
         <div class="canvas" id="canvas" hidden></div>
         <form class="props pcbv-ui" id="props" hidden aria-label="Selected item" autocomplete="off"></form>
         <div class="welcome" id="welcome">
-          <div class="welcome-card" id="drop">
+          <div class="onb" id="onb-start">
             <div class="welcome-mark" aria-hidden="true"></div>
-            <h1>Check a PCB before you order it</h1>
-            <p>Open a KiCad project folder or drop it here. fabready checks routing, fab limits and the board outline,
-              plus extra checks for keyboards, then re-checks every time you save in KiCad.</p>
-            <button class="btn primary" id="open-empty">Open project…</button>
+            <h1>Get your PCB ready to order</h1>
+            <div class="onb-choices">
+              <button class="onb-card" id="drop" data-start="open" title="Or drop a project folder or board file on this window">
+                <span class="onb-ico" data-icon="folder"></span>
+                <span class="onb-t">I have a design</span>
+              </button>
+              <button class="onb-card" data-start="new">
+                <span class="onb-ico" data-icon="plus"></span>
+                <span class="onb-t">Start a new board</span>
+              </button>
+            </div>
+            <h2 class="onb-or" id="onb-or">Or try a sample board <span aria-hidden="true">↓</span></h2>
+            <div class="onb-samples" id="onb-samples" role="group" aria-labelledby="onb-or">
+              <button class="onb-sample" data-sample="macropad-buggy">
+                <span class="onb-thumb" data-thumb="macropad-buggy"></span>
+                <span class="onb-t">Keyboard macropad with mistakes</span>
+                <span class="onb-d">A missing diode, a backwards diode and vias the fab can't drill. Some have automatic fixes.</span>
+              </button>
+              <button class="onb-sample" data-sample="sensor-board">
+                <span class="onb-thumb" data-thumb="sensor-board"></span>
+                <span class="onb-t">Sensor board with part problems</span>
+                <span class="onb-d">An LED driven too hard, a resistor running hot and a capacitor without enough voltage margin.</span>
+              </button>
+              <button class="onb-sample" data-sample="macropad">
+                <span class="onb-thumb" data-thumb="macropad"></span>
+                <span class="onb-t">Clean keyboard macropad</span>
+                <span class="onb-d">The same macropad without the mistakes, to compare against.</span>
+              </button>
+            </div>
           </div>
         </div>
         <div class="toast" id="toast" role="status" hidden></div>
@@ -104,28 +123,111 @@
     </aside>
   </div>
 
-  <dialog id="agents-dialog">
-    <h2>Connect AI agents</h2>
-    <p>The <b>Agent</b> tab chats with Claude Code, Codex or OpenCode right here. If you'd rather use your own
-      terminal or editor, this app is also an MCP server: connected agents can check the board, see it, apply
-      fabready's automatic fixes (<code>list_fixes</code>, <code>apply_fix</code>) and fix the rest by editing your
-      KiCad files, while the app re-checks after every save.</p>
-    <h3>Claude Code</h3>
-    <pre id="mcp-claude"></pre>
-    <h3>Codex</h3>
-    <pre id="mcp-codex"></pre>
-    <h3>Claude Desktop, Cursor, and Other MCP Clients</h3>
-    <pre id="mcp-json"></pre>
-    <div class="actions">
-      <button class="btn" id="copy-claude">Copy Claude command</button>
-      <button class="btn" id="copy-codex">Copy Codex command</button>
-      <button class="btn" id="copy-json">Copy JSON</button>
-      <button class="btn primary" id="close-agents">Done</button>
+  <dialog id="onboard-dialog" class="onboard" aria-labelledby="ob-title">
+    <button class="icon-btn ob-close" id="ob-close" aria-label="Close setup" title="Close (Esc)"></button>
+    <div class="ob-body">
+      <div class="ob-left" id="ob-page"></div>
+      <div class="ob-right" id="ob-art" aria-hidden="true"></div>
+    </div>
+    <div class="ob-foot">
+      <div class="ob-progress" id="ob-progress"></div>
+      <button class="btn" id="ob-back">Back</button>
+      <button class="btn primary" id="ob-next">Continue</button>
     </div>
   </dialog>
 
+  <dialog id="settings-dialog" class="app-settings" aria-label="Settings">
+    <nav class="as-side" aria-label="Settings pages">
+      <span class="field as-search"><input id="as-search" placeholder="Search" aria-label="Search settings" spellcheck="false" autocomplete="off"><span class="ico" data-icon="search"></span></span>
+      <div class="as-menu" id="as-menu"></div>
+    </nav>
+    <div class="as-main" id="as-scroll">
+      <button class="icon-btn as-close" id="close-settings" aria-label="Close settings" title="Close (Esc)"></button>
+      <div class="as-page" id="as-page"></div>
+    </div>
+  </dialog>
+
+  <dialog id="new-dialog" class="new-dialog" aria-labelledby="nf-title">
+    <form id="new-form" autocomplete="off" novalidate>
+      <h2 id="nf-title">New board</h2>
+      <p>Creates a KiCad project with an empty schematic and the board outline. You add the parts and wiring in KiCad,
+        and fabready re-checks every time you save.</p>
+      <div class="nf-grid">
+        <label for="nf-name">Name</label>
+        <span class="field"><input id="nf-name" spellcheck="false" value="my-board"></span>
+
+        <label for="nf-where">Location</label>
+        <div class="nf-where"><span class="field"><input id="nf-where" spellcheck="false" class="mono"></span>
+          <button type="button" class="btn" id="nf-browse">Choose…</button></div>
+        <span></span><div class="nf-hint" id="nf-path"></div>
+
+        <span class="nf-label" id="nf-kind-l">Starting point</span>
+        <div class="seg" role="radiogroup" aria-labelledby="nf-kind-l">
+          <label><input type="radio" name="nf-kind" value="blank" checked><span>Blank board</span></label>
+          <label><input type="radio" name="nf-kind" value="keyboard"><span>Keyboard</span></label>
+        </div>
+
+        <details class="nf-more" id="nf-more">
+          <summary><span class="nf-label">Board</span>
+            <span class="nf-sum"><span id="nf-sum"></span><span class="nf-edit" aria-hidden="true"></span></span></summary>
+          <div class="nf-grid nf-inner">
+            <span class="nf-label kb-only" id="nf-switch-l">Switches</span>
+            <div class="seg kb-only" role="radiogroup" aria-labelledby="nf-switch-l">
+              <label><input type="radio" name="nf-switch" value="mx" checked><span>MX-style · 19.05 mm</span></label>
+              <label><input type="radio" name="nf-switch" value="choc"><span>Choc · 18 × 17 mm</span></label>
+            </div>
+            <span class="nf-label kb-only">Keys</span>
+            <div class="nf-pair kb-only">
+              <span class="field"><input id="nf-cols" inputmode="numeric" value="3" aria-label="Columns"><span class="unit">columns</span></span>
+              <span class="x">×</span>
+              <span class="field"><input id="nf-rows" inputmode="numeric" value="3" aria-label="Rows"><span class="unit">rows</span></span>
+            </div>
+            <span class="kb-only"></span><div class="nf-hint kb-only">Adds a key grid guide on User.Drawings, with room for the controller above the keys.</div>
+
+            <span class="nf-label">Board size</span>
+            <div class="nf-pair">
+              <span class="field"><input id="nf-w" inputmode="decimal" value="50" aria-label="Width"><span class="unit">mm wide</span></span>
+              <span class="x">×</span>
+              <span class="field"><input id="nf-h" inputmode="decimal" value="50" aria-label="Height"><span class="unit">mm tall</span></span>
+            </div>
+          </div>
+        </details>
+
+        <span class="nf-label" id="nf-layers-l">Copper layers</span>
+        <div class="seg" role="radiogroup" aria-labelledby="nf-layers-l">
+          <label><input type="radio" name="nf-layers" value="2" checked><span>2 layers</span></label>
+          <label><input type="radio" name="nf-layers" value="4"><span>4 layers</span></label>
+        </div>
+
+        <label for="nf-profile">Fab</label>
+        <label class="select"><select id="nf-profile">
+          <option value="jlcpcb">JLCPCB</option>
+          <option value="safe">Safe (any fab)</option>
+        </select></label>
+
+        <span></span><label class="nf-check"><input type="checkbox" id="nf-holes" checked>M3 mounting holes in the corners</label>
+      </div>
+
+      <h3><label for="nf-brief">What are you building?</label> <span class="opt">Optional</span></h3>
+      <textarea id="nf-brief" rows="3" spellcheck="true"
+        placeholder="e.g. A 4×4 macropad with a rotary encoder and an RP2040, powered over USB-C"></textarea>
+      <div class="nf-hint">If you describe it, the agent starts a conversation to help you pick parts, draw the schematic and lay out the board.</div>
+
+      <div class="nf-err" id="nf-err" role="alert" hidden></div>
+      <div class="actions">
+        <button type="button" class="btn" id="nf-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="nf-create">Create board</button>
+      </div>
+    </form>
+  </dialog>
+  <div class="tour-ring" id="tour-ring" hidden></div>
+  <div class="tour" id="tour" role="dialog" aria-labelledby="tour-t" aria-describedby="tour-d" hidden></div>
   <script src="agent.js"></script>
   <script src="editor.js"></script>
+  <script src="tour.js"></script>
+  <script src="setup.js"></script>
+  <script src="onboard.js"></script>
+  <script src="settings.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

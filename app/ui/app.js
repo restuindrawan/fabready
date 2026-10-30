@@ -50,6 +50,11 @@
     minus: '<path d="M3.5 8h9"/>',
     plus: '<path d="M3.5 8h9M8 3.5v9"/>',
     layers: '<path d="M8 2.5 14 5.5 8 8.5 2 5.5z"/><path d="M2 8.2 8 11.2 14 8.2M2 10.9 8 13.9 14 10.9"/>',
+    external: '<path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/>',
+    gear: '<circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.15 1.15M11.25 11.25l1.15 1.15M3.6 12.4l1.15-1.15M11.25 4.75l1.15-1.15"/><circle cx="8" cy="8" r="4.2"/>',
+    sun: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05"/>',
+    chip: '<rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 1.8V4M9.5 1.8V4M6.5 12v2.2M9.5 12v2.2M1.8 6.5H4M1.8 9.5H4M12 6.5h2.2M12 9.5h2.2"/>',
+    info: '<circle cx="8" cy="8" r="6"/><path d="M8 7.2V11M8 5v.01"/>',
   };
   const icon = (name) =>
     `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
@@ -128,7 +133,7 @@
     finding: (i) => state.payload && state.payload.report.findings[i],
     focusRefs: (refs) => canvas.focusRefs(refs),
     startPreview: (ids) => startPreview(ids, true),
-    openMcp: () => $("agents").click(),
+    openMcp: () => settings.open("agents"),
     view: () => canvas.view(),
     showLayers: (names) => canvas.showLayers(names),
     setSide: (side) => canvas.setSide(side),
@@ -147,6 +152,33 @@
     recordUndo: (path, verb, label) => chat.event(path, { agent: `The user ${verb.toLowerCase()} a change: ${label}.`, user: `${verb}: ${label}.` }),
     ask: (infos) => { openChat(); chat.askItems(infos.map((i) => ({ info: i, text: editor.describe(i) }))); },
   });
+
+  const tour = window.FabreadyTour({
+    esc, icon,
+    report: () => state.payload && state.payload.report,
+    path: () => state.path,
+    select: (i) => { setTab("findings"); select(i, true); },
+    setTab: (tab) => setTab(tab),
+  });
+
+  let onboarding = null;
+  const setup = window.FabreadySetup({
+    invoke, listen, esc, icon, toast,
+    onChange: () => onboarding && onboarding.refresh(),
+    onDone: (id, ok, message) => {
+      if (ok) {
+        toast(message);
+        if (state.path) check();
+      } else if (!/cancelled/i.test(message)) {
+        toast(message.split("\n")[0], "error", { label: "Details", run: () => settings.open("setup") });
+      }
+    },
+  });
+
+  const settings = window.FabreadySettings({
+    invoke, store, esc, icon, ago, copyText, editor, setup,
+  });
+  onboarding = window.FabreadyOnboarding({ invoke, store, esc, icon, setup, previews: samplePreviews, onFinish: () => finishSetup() });
 
   // ------------------------------------------------------------ helpers
   function ago(t) {
@@ -200,12 +232,6 @@
     // Left-to-right marks keep the slashes in place inside the right-to-left (truncate-from-the-left) label.
     $("project-path").textContent = state.path ? `\u200E${state.path}\u200E` : "";
     document.title = state.path ? `${basename(state.path)} — fabready` : "fabready";
-    const r = state.payload && state.payload.report;
-    if (r) {
-      const t = r.tools || {};
-      $("kicad-status").textContent = t.kicad_cli ? `KiCad DRC: on · ${t.kicad_version || ""}` : "KiCad DRC: not installed";
-      $("kicad-status").title = t.kicad_cli ? t.kicad_cli : "Install KiCad for its full DRC/ERC: brew install --cask kicad";
-    }
   }
 
   function markTab(tab) {
@@ -278,8 +304,7 @@
     app.dataset.state = "ready";
     $("welcome").hidden = true;
     $("canvas").hidden = false;
-    for (const id of ["profile-field", "recheck", "export", "toggle-inspector"]) $(id).hidden = false;
-    $("profile").value = payload.report.profile;
+    for (const id of ["recheck", "open-kicad", "export", "toggle-inspector"]) $(id).hidden = false;
     canvas.update(payload.svg, payload.report.board);
     if (state.active != null && !payload.report.findings[state.active]) state.active = null;
     const f = state.active != null ? payload.report.findings[state.active] : null;
@@ -307,8 +332,17 @@
   }
 
   // ------------------------------------------------------------ checking
+  let kicadPrompted = false;
+  /** Once per run: a check ran without kicad-cli, so KiCad's DRC and ERC were skipped. */
+  function promptKicad(report) {
+    if (kicadPrompted || (report.tools && report.tools.kicad_cli) || setup.installing("kicad")) return;
+    kicadPrompted = true;
+    toast("KiCad isn't installed, so its DRC and ERC are skipped.", null, { label: "Install", run: () => settings.open("setup") });
+  }
+
   function accept(payload) {
     rememberProject(state.path, payload.report);
+    promptKicad(payload.report);
     if (state.preview) {
       // Keep the preview on screen; applying will notice the file changed and ask to preview again.
       state.payload = payload;
@@ -358,6 +392,189 @@
   async function pickProject() {
     const picked = await invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Open KiCad project folder" } });
     if (picked) openProject(picked);
+  }
+
+  // ------------------------------------------------------------ onboarding (welcome screen, new board, samples)
+  async function openSample(name, card) {
+    if (card) card.setAttribute("aria-busy", "true");
+    try {
+      const dir = await invoke("open_sample", { name });
+      await openProject(dir);
+      if (state.path === dir && state.payload && store.get("sampleTour", true)) tour.start();
+    } catch (e) {
+      toast(String(e), "error");
+    } finally {
+      if (card) card.removeAttribute("aria-busy");
+    }
+  }
+
+  /** Each sample board drawn with its finding markers, as blob URLs by name (null if they couldn't be drawn). */
+  let previews = null;
+  function samplePreviews() {
+    previews = previews || invoke("sample_previews")
+      .then((list) => Object.fromEntries(list.map(({ name, svg }) => [name, URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }))])))
+      .catch(() => null);
+    return previews;
+  }
+
+  /** Draw each sample board (with its finding markers) on its welcome card. */
+  async function loadSamplePreviews() {
+    const urls = await samplePreviews();
+    if (!urls) return $("onb-samples").classList.add("no-thumbs");
+    for (const [name, url] of Object.entries(urls)) {
+      const box = document.querySelector(`[data-thumb="${name}"]`);
+      if (box) box.innerHTML = `<img alt="" src="${url}">`;
+    }
+  }
+
+  function setTab(tab) {
+    if (app.dataset.inspector === "closed") setPanel("inspector", "open");
+    if (state.tab === tab) return;
+    state.tab = tab;
+    store.set("tab", tab);
+    renderInspector();
+  }
+
+  async function openInKicad() {
+    if (!state.path) return;
+    try {
+      await invoke("open_in_kicad", { path: state.path });
+    } catch (e) {
+      const missing = /Couldn't start KiCad/.test(String(e));
+      toast(String(e), "error", missing ? { label: "Install KiCad", run: () => settings.open("setup") } : undefined);
+    }
+  }
+
+  /** After first-launch setup: it showed what's missing, so don't remind them on the first check. */
+  function finishSetup() {
+    if (setup.missing().length) kicadPrompted = true;
+    if (!state.path) $("drop").focus();
+  }
+
+  const SWITCH_PITCH = { mx: [19.05, 19.05], choc: [18, 17] };
+  // Keyboard boards: this much board around the keys, plus room above them for the controller.
+  const KB_MARGIN = 8, KB_CONTROLLER = 20;
+  const nf = (id) => $("nf-" + id);
+  const radio = (name) => (document.querySelector(`input[name="nf-${name}"]:checked`) || {}).value;
+  const round2 = (v) => String(Math.round(v * 100) / 100);
+  const num = (id) => Number(nf(id).value.trim().replace(",", "."));
+
+  function newBoardSize() {
+    if (radio("kind") !== "keyboard") return;
+    const [px, py] = SWITCH_PITCH[radio("switch")];
+    const cols = Math.round(num("cols")), rows = Math.round(num("rows"));
+    if (!(cols > 0 && rows > 0)) return;
+    nf("w").value = round2(cols * px + 2 * KB_MARGIN);
+    nf("h").value = round2(rows * py + 2 * KB_MARGIN + KB_CONTROLLER);
+  }
+
+  function newBoardPath() {
+    const where = nf("where").value.trim().replace(/[\\/]+$/, "");
+    const name = nf("name").value.trim();
+    nf("path").textContent = where && name ? `Creates ${where}/${name}/` : "";
+  }
+
+  /** One-line summary for the collapsed Board row. */
+  function newBoardSummary() {
+    const size = `${nf("w").value.trim() || "?"} × ${nf("h").value.trim() || "?"} mm`;
+    const kb = radio("kind") === "keyboard"
+      ? `${nf("cols").value.trim() || "?"} × ${nf("rows").value.trim() || "?"} keys, ${radio("switch") === "choc" ? "Choc" : "MX-style"} · ` : "";
+    nf("sum").textContent = kb + size;
+  }
+
+  async function newBoard() {
+    const dlg = $("new-dialog");
+    if (dlg.open) return;
+    nf("where").value = store.get("newDir", null) || (await invoke("default_project_dir").catch(() => null)) || "";
+    nf("profile").value = store.get("newProfile", "jlcpcb");
+    nf("err").hidden = true;
+    newBoardPath();
+    newBoardSummary();
+    dlg.showModal();
+    nf("name").focus();
+    nf("name").select();
+  }
+
+  /** The new-board form -> {parent, project} for create_project, or an error message. */
+  function readNewBoard() {
+    const parent = nf("where").value.trim();
+    const name = nf("name").value.trim();
+    if (!name) return { error: "Give the board a name." };
+    if (!parent) return { error: "Choose where to create the project." };
+    const width = num("w"), height = num("h");
+    if (!(width > 0 && height > 0)) return { error: "Enter the board size in mm.", more: true };
+    let keyboard = null;
+    if (radio("kind") === "keyboard") {
+      const cols = num("cols"), rows = num("rows");
+      if (!(Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0)) return { error: "Enter whole numbers of columns and rows.", more: true };
+      const [pitch_x, pitch_y] = SWITCH_PITCH[radio("switch")];
+      keyboard = { rows, cols, pitch_x, pitch_y };
+    }
+    const project = { name, width, height, copper_layers: Number(radio("layers")), mounting_holes: nf("holes").checked, profile: nf("profile").value, keyboard };
+    return { parent, project, brief: nf("brief").value.trim() };
+  }
+
+  /** First message to the agent for a board started from a description. */
+  function planPrompt(p, brief) {
+    const kb = p.keyboard ? `, set up for a keyboard with ${p.keyboard.cols} × ${p.keyboard.rows} keys at ${p.keyboard.pitch_x} × ${p.keyboard.pitch_y} mm pitch` : "";
+    return [
+      `I just created this KiCad project in fabready and want to design it from scratch: ${p.name}, a ${p.width} × ${p.height} mm board with ${p.copper_layers} copper layers${kb}, to be made at ${PROFILE_LABELS[p.profile] || p.profile}. ` +
+        `The schematic and board are empty apart from the outline${p.mounting_holes ? " and mounting holes" : ""}.`,
+      "",
+      `What I want to build: ${brief}`,
+      "",
+      "Help me plan it before we draw anything:",
+      "1. Ask me what you need to know first (power source, connectors, size limits, how it gets assembled).",
+      "2. Suggest the main parts with real part numbers, and the KiCad symbols and footprints to use.",
+      "3. Outline the schematic blocks and how they connect.",
+      "4. Suggest a layout, and say whether the board size works.",
+      "Then walk me through building it in KiCad step by step. Don't edit my files unless I ask.",
+    ].join("\n");
+  }
+
+  async function createBoard(e) {
+    e.preventDefault();
+    const form = readNewBoard();
+    const err = nf("err");
+    if (form.error) {
+      err.textContent = form.error;
+      err.hidden = false;
+      if (form.more) $("nf-more").open = true;
+      return;
+    }
+    const btn = nf("create");
+    btn.disabled = true;
+    let dir;
+    try {
+      dir = await invoke("create_project", { parent: form.parent, project: form.project });
+    } catch (x) {
+      err.textContent = String(x);
+      err.hidden = false;
+      if (/bigger|600 mm|rows|columns|pitch/.test(String(x))) $("nf-more").open = true;
+      return;
+    } finally {
+      btn.disabled = false;
+    }
+    store.set("newDir", form.parent);
+    $("new-dialog").close();
+    nf("name").value = "my-board";
+    nf("brief").value = "";
+    await openProject(dir);
+    if (state.path !== dir || !state.payload) return;
+    if (form.brief) {
+      openChat();
+      chat.begin(planPrompt(form.project, form.brief));
+    }
+    toast(`Created ${form.project.name}. Add parts and wiring in KiCad; fabready re-checks every time you save.`, null,
+      { label: "Open in KiCad", run: openInKicad });
+  }
+
+  async function browseNewBoard() {
+    const picked = await invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Create the new project in…", defaultPath: nf("where").value.trim() || undefined } });
+    if (picked) {
+      nf("where").value = picked;
+      newBoardPath();
+    }
   }
 
   function setPanel(which, value) {
@@ -668,7 +885,7 @@
     }
   }
 
-  /** Change fabready.json on disk (header profile, Waive) without losing unsaved edits in the form. */
+  /** Change fabready.json on disk (Waive and its Undo) without losing unsaved edits in the form. */
   async function updateConfig(change) {
     const path = state.path;
     if (!path) return false;
@@ -693,7 +910,6 @@
       return true;
     } catch (e) {
       toast(String(e), "error");
-      if (state.payload) $("profile").value = state.payload.report.profile;
       return false;
     }
   }
@@ -715,12 +931,6 @@
   // ------------------------------------------------------------ agent hand-off
   async function refreshAgent() {
     try { state.agent = await invoke("agent_status"); } catch { state.agent = null; }
-    const el = $("agent-status");
-    el.hidden = !state.agent;
-    if (state.agent) {
-      el.textContent = `Agent: ${state.agent.client} · ${ago(state.agent.at * 1000)}`;
-      el.title = "Last agent that connected to fabready over MCP";
-    }
   }
 
   function promptFor(indices) {
@@ -734,7 +944,7 @@
       else if (f.fix) lines.push(`   Suggested fix: ${f.fix}`);
       return lines.join("\n");
     }).join("\n\n");
-    const setup = state.exe ? `claude mcp add fabready -- "${state.exe}" mcp` : "the Connect agents dialog in the fabready app";
+    const setup = state.exe ? `claude mcp add fabready -- "${state.exe}" mcp` : "Settings in the fabready app";
     return [
       `Please fix ${indices.length === 1 ? "this issue" : "these issues"} in my KiCad PCB project before I order it.`,
       "",
@@ -784,15 +994,36 @@
 
   // ------------------------------------------------------------ events
   $("open").onclick = pickProject;
-  $("open-empty").onclick = pickProject;
+  $("new").onclick = newBoard;
+  $("open-kicad").onclick = openInKicad;
+  $("welcome").addEventListener("click", (e) => {
+    const sample = e.target.closest("[data-sample]");
+    if (sample) return openSample(sample.dataset.sample, sample);
+    const start = e.target.closest("[data-start]");
+    if (!start) return;
+    if (start.dataset.start === "open") pickProject();
+    else if (start.dataset.start === "new") newBoard();
+  });
+  $("new-form").addEventListener("submit", createBoard);
+  const onNewBoardInput = (e) => {
+    if (["nf-cols", "nf-rows"].includes(e.target.id) || ["nf-kind", "nf-switch"].includes(e.target.name)) {
+      $("new-dialog").classList.toggle("kb", radio("kind") === "keyboard");
+      if (radio("kind") === "keyboard") newBoardSize();
+      else if (e.target.name === "nf-kind") { nf("w").value = "50"; nf("h").value = "50"; }
+    }
+    if (e.target.id === "nf-name" || e.target.id === "nf-where") newBoardPath();
+    newBoardSummary();
+    nf("err").hidden = true;
+  };
+  $("new-form").addEventListener("input", onNewBoardInput);
+  // Not every engine fires `input` for radio buttons; handling both is harmless.
+  $("new-form").addEventListener("change", (e) => { if (e.target.type === "radio") onNewBoardInput(e); });
+  $("nf-browse").onclick = browseNewBoard;
+  $("nf-cancel").onclick = () => $("new-dialog").close();
   $("recheck").onclick = check;
   $("toggle-sidebar").onclick = () => setPanel("sidebar", "closed");
   $("show-sidebar").onclick = () => setPanel("sidebar", "open");
   $("toggle-inspector").onclick = () => setPanel("inspector", app.dataset.inspector === "open" ? "closed" : "open");
-  $("profile").onchange = (e) => {
-    const profile = e.target.value;
-    updateConfig((c) => { c.profile = profile; });
-  };
   $("export").onclick = async () => {
     try {
       const dir = await invoke("export_report", { path: state.path });
@@ -926,36 +1157,29 @@
   await listen("tauri://drag-leave", () => $("drop").classList.remove("over"));
   await listen("tauri://drag-drop", (e) => {
     $("drop").classList.remove("over");
+    if (document.querySelector("dialog[open]")) return;
     const p = e.payload && e.payload.paths && e.payload.paths[0];
     if (p) openProject(p);
   });
 
-  // Agents dialog: this same app binary is the MCP server (`<app> mcp`).
-  $("agents").onclick = async () => {
-    const exe = await invoke("mcp_command");
-    const json = JSON.stringify({ mcpServers: { fabready: { command: exe, args: ["mcp"] } } }, null, 2);
-    const claude = `claude mcp add fabready -- "${exe}" mcp`;
-    const codex = `codex mcp add fabready -- "${exe}" mcp`;
-    $("mcp-json").textContent = json;
-    $("mcp-claude").textContent = claude;
-    $("mcp-codex").textContent = codex;
-    $("copy-json").onclick = () => { copyText(json); toast("Copied MCP config"); };
-    $("copy-claude").onclick = () => { copyText(claude); toast("Copied command"); };
-    $("copy-codex").onclick = () => { copyText(codex); toast("Copied command"); };
-    $("agents-dialog").showModal();
-  };
-  $("close-agents").onclick = () => $("agents-dialog").close();
+  $("settings").onclick = () => settings.open();
 
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && state.preview && !$("agents-dialog").open) {
+    // Dialogs handle their own keys (Esc closes them); keep board shortcuts out of their text fields.
+    if (document.querySelector("dialog[open]")) return;
+    if (e.key === "Escape" && tour.active()) {
+      tour.end();
+      return;
+    }
+    if (e.key === "Escape" && state.preview) {
       endPreview(true);
       return;
     }
-    if (state.payload && !state.preview && !$("agents-dialog").open && editor.keydown(e)) {
+    if (state.payload && !state.preview && editor.keydown(e)) {
       e.preventDefault();
       return;
     }
-    if (e.key === "Escape" && state.active != null && !$("agents-dialog").open) {
+    if (e.key === "Escape" && state.active != null) {
       state.active = null;
       canvas.focus(null);
       renderInspector();
@@ -965,6 +1189,7 @@
     if (!(e.metaKey || e.ctrlKey)) return;
     const actions = {
       o: pickProject,
+      n: newBoard,
       r: check,
       b: () => setPanel("sidebar", app.dataset.sidebar === "open" ? "closed" : "open"),
       i: () => setPanel("inspector", app.dataset.inspector === "open" ? "closed" : "open"),
@@ -972,6 +1197,7 @@
       s: () => state.tab === "settings" && dirty() && saveSettings(),
       enter: () => state.preview && applyPreview(),
       l: openChat,
+      ",": () => settings.open(),
     };
     if (e.shiftKey && e.key.toLowerCase() === "f" && state.payload && state.payload.report.fixes.length && !state.preview) {
       e.preventDefault();
@@ -991,7 +1217,10 @@
   renderProjects();
   refreshAgent();
   invoke("mcp_command").then((exe) => (state.exe = exe)).catch(() => {});
-  $("kicad-status").textContent = "KiCad DRC: open a project to detect";
   const initial = await invoke("initial_path");
   if (initial) openProject(initial);
+  else {
+    loadSamplePreviews();
+    onboarding.maybeOpen();
+  }
 })();
